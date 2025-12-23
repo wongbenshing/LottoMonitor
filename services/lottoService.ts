@@ -1,100 +1,146 @@
 
 import { LottoDraw } from "../types";
 
-// List of multiple proxies to ensure redundancy. 
-// Browsers often block CORS requests; these proxies help bypass those restrictions.
 const PROXIES = [
-  "https://corsproxy.io/?",
   "https://api.allorigins.win/raw?url=",
+  "https://corsproxy.io/?",
   "https://thingproxy.freeboard.io/fetch/"
 ];
 
-const DLT_URL = "https://datachart.500.com/dlt/history/newinc/history.php?limit=5000&sort=0";
+// User can replace this with their actual raw GitHub CSV URL
+const REMOTE_CSV_URL = ""; 
+
+const TRIAL_LIMITS = [2000, 1000, 500, 100];
 
 /**
- * Replicates the Python request logic to crawl DLT history.
- * Iterates through available proxies to handle potential 'Failed to fetch' errors.
+ * Converts LottoDraw array to a CSV string
+ */
+export const convertToCSV = (data: LottoDraw[]): string => {
+  const header = "id,date,f1,f2,f3,f4,f5,b1,b2\n";
+  const rows = data.map(d => 
+    `${d.id},${d.date},${d.front.join(',')},${d.back.join(',')}`
+  ).join('\n');
+  return header + rows;
+};
+
+/**
+ * Parses a CSV string into LottoDraw array
+ */
+export const parseCSV = (csvText: string): LottoDraw[] => {
+  const lines = csvText.split('\n').filter(line => line.trim() && !line.startsWith('id'));
+  return lines.map(line => {
+    const parts = line.split(',');
+    if (parts.length < 9) return null;
+    return {
+      id: parts[0],
+      date: parts[1],
+      front: parts.slice(2, 7).map(n => parseInt(n)),
+      back: parts.slice(7, 9).map(n => parseInt(n))
+    };
+  }).filter((d): d is LottoDraw => d !== null);
+};
+
+/**
+ * Fetches historical data from a remote CSV file (e.g. GitHub)
+ */
+export const fetchRemoteHistory = async (url: string = REMOTE_CSV_URL): Promise<LottoDraw[]> => {
+  if (!url) return [];
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return [];
+    const text = await response.text();
+    return parseCSV(text);
+  } catch (e) {
+    console.error("Remote CSV fetch failed", e);
+    return [];
+  }
+};
+
+/**
+ * Fetches and parses lottery data from 500.com with a specific limit.
+ */
+async function fetchWithLimit(limit: number, proxyBase: string): Promise<LottoDraw[]> {
+  const url = `https://datachart.500.com/dlt/history/newinc/history.php?limit=${limit}&sort=0`;
+  const targetUrl = `${proxyBase}${encodeURIComponent(url)}`;
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); 
+
+  try {
+    const response = await fetch(targetUrl, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) throw new Error(`Status ${response.status}`);
+    
+    const htmlText = await response.text();
+    if (!htmlText.includes('t_tr1')) throw new Error("No table rows found");
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlText, "text/html");
+
+    const trElements = Array.from(doc.querySelectorAll('tr.t_tr1'));
+    const results: LottoDraw[] = [];
+
+    trElements.forEach(row => {
+      const tds = row.querySelectorAll('td');
+      if (tds.length < 9) return;
+
+      const drawId = tds[0].textContent?.trim() || "";
+      const front = [
+        parseInt(tds[1].textContent || "0"),
+        parseInt(tds[2].textContent || "0"),
+        parseInt(tds[3].textContent || "0"),
+        parseInt(tds[4].textContent || "0"),
+        parseInt(tds[5].textContent || "0")
+      ];
+      const back = [
+        parseInt(tds[6].textContent || "0"),
+        parseInt(tds[7].textContent || "0")
+      ];
+      
+      let drawDate = "";
+      for (let i = tds.length - 1; i >= 0; i--) {
+        const val = tds[i].textContent?.trim() || "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+          drawDate = val;
+          break;
+        }
+      }
+
+      if (drawId && drawDate && !front.some(isNaN) && !back.some(isNaN)) {
+        results.push({ id: drawId, date: drawDate, front, back });
+      }
+    });
+
+    return results;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    throw e;
+  }
+}
+
+/**
+ * Automatically attempts to find the largest working limit and syncs all records.
  */
 export const crawlLottoHistory = async (): Promise<LottoDraw[]> => {
   let lastError: Error | null = null;
 
-  for (const proxyBase of PROXIES) {
-    try {
-      console.log(`Attempting to sync via proxy: ${proxyBase}`);
-      
-      const targetUrl = `${proxyBase}${encodeURIComponent(DLT_URL)}`;
-      
-      // Set a reasonable timeout for the fetch
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  for (const proxy of PROXIES) {
+    for (const limit of TRIAL_LIMITS) {
+      try {
+        const data = await fetchWithLimit(limit, proxy);
+        if (data.length > 5) {
+          return data;
         }
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`Proxy error: ${response.status} ${response.statusText}`);
+      } catch (err) {
+        lastError = err as Error;
       }
-      
-      const htmlText = await response.text();
-      
-      // Basic validation: Check if we actually got the data table
-      if (!htmlText.includes('cfont2') && !htmlText.includes('t_tr1')) {
-        throw new Error("Invalid content received from proxy (possibly blocked or anti-bot triggered)");
-      }
-
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(htmlText, "text/html");
-
-      const frontElements = Array.from(doc.querySelectorAll('.cfont2'));
-      const rearElements = Array.from(doc.querySelectorAll('.cfont4'));
-      const trElements = Array.from(doc.querySelectorAll('tr.t_tr1'));
-
-      const frontNumbers = frontElements.map(el => parseInt(el.textContent || "0")).filter(n => !isNaN(n));
-      const rearNumbers = rearElements.map(el => parseInt(el.textContent || "0")).filter(n => !isNaN(n));
-      
-      const results: LottoDraw[] = [];
-      const counts = Math.floor(frontNumbers.length / 5);
-
-      for (let i = 0; i < counts; i++) {
-        const row = trElements[i];
-        if (!row) continue;
-
-        const tds = row.querySelectorAll('td');
-        if (tds.length < 2) continue;
-
-        const drawId = tds[0].textContent?.trim() || "";
-        const drawDate = tds[tds.length - 1].textContent?.trim() || "";
-
-        const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-        if (!datePattern.test(drawDate)) continue;
-
-        results.push({
-          id: drawId,
-          date: drawDate,
-          front: frontNumbers.slice(i * 5, i * 5 + 5),
-          back: rearNumbers.slice(i * 2, i * 2 + 2)
-        });
-      }
-
-      if (results.length > 0) {
-        return results;
-      }
-      
-      throw new Error("No lottery records parsed from the page");
-
-    } catch (error) {
-      console.warn(`Proxy ${proxyBase} failed:`, error);
-      lastError = error instanceof Error ? error : new Error(String(error));
-      // Continue to the next proxy in the list
     }
   }
 
-  throw lastError || new Error("Failed to fetch from all available proxies");
+  throw lastError || new Error("All sync attempts failed");
 };

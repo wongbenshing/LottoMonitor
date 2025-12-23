@@ -38,6 +38,11 @@ const AnalyzerView: React.FC<Props> = ({ history }) => {
     setBack(next);
   };
 
+  const maxPrize = useMemo(() => {
+    if (!results) return null;
+    return results.find(r => r.count > 0);
+  }, [results]);
+
   return (
     <div className="space-y-6">
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
@@ -90,10 +95,24 @@ const AnalyzerView: React.FC<Props> = ({ history }) => {
       </div>
 
       {results && (
-        <div className="space-y-3 animate-in fade-in duration-500">
+        <div className="space-y-4 animate-in fade-in duration-500">
           <div className="flex justify-between items-center">
              <h4 className="font-bold text-slate-700">回测结果统计</h4>
              <span className="text-xs text-slate-400">在 {history.length} 期开奖中</span>
+          </div>
+
+          {/* User Insight Alert */}
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl">
+            <div className="flex gap-3">
+              <span className="text-xl">📊</span>
+              <div>
+                <h5 className="font-bold text-amber-900 text-sm">大数据分析提示</h5>
+                <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                  回测发现：该组号码历史最高中奖等级为 <span className="font-bold">{maxPrize ? maxPrize.name : '无奖'}</span>。
+                  根据统计规律，大部分号码组合的历史最高获奖金额概率上仅为 <span className="font-bold text-amber-900">15元 (九等奖)</span>。
+                </p>
+              </div>
+            </div>
           </div>
           
           <div className="grid grid-cols-1 gap-3">

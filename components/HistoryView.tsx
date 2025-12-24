@@ -68,7 +68,7 @@ const HistoryView: React.FC<Props> = ({ history, isSyncing, onUpdate, onSync }) 
 
   return (
     <div className="space-y-4">
-      {/* Sticky Filter Bar */}
+      {/* Sticky Filter Bar - Adjusted Z-index and relative position */}
       <div className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col gap-3 sticky top-[58px] z-20">
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -148,7 +148,8 @@ const HistoryView: React.FC<Props> = ({ history, isSyncing, onUpdate, onSync }) 
         )}
       </div>
 
-      <div className="space-y-3 pt-1">
+      {/* Result list with top padding to ensure first record isn't obscured */}
+      <div className="space-y-3 pt-4">
         {filteredHistory.length === 0 ? (
           <div className="py-20 text-center">
             <p className="text-slate-400">没有找到匹配的记录</p>

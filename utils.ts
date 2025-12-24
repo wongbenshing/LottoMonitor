@@ -41,3 +41,35 @@ export const calculateHistoricalPrizes = (userFront: number[], userBack: number[
 
   return Object.values(results);
 };
+
+/**
+ * Simple Linear Regression for Sum Prediction
+ * Uses the last 30 draws to project the next value
+ */
+export const predictNextSum = (history: LottoDraw[]): number => {
+  if (history.length < 5) return 90; // Default average
+  
+  const sampleSize = Math.min(history.length, 30);
+  const data = history.slice(0, sampleSize).reverse().map((d, i) => ({
+    x: i,
+    y: d.front.reduce((a, b) => a + b, 0)
+  }));
+
+  const n = data.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (const point of data) {
+    sumX += point.x;
+    sumY += point.y;
+    sumXY += point.x * point.y;
+    sumX2 += point.x * point.x;
+  }
+
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  
+  // Predict next point (n)
+  const prediction = Math.round(slope * n + intercept);
+  
+  // Clamp to reasonable lottery sum range (usually 30-150)
+  return Math.max(30, Math.min(155, prediction));
+};

@@ -1,7 +1,8 @@
 
 import React, { useMemo, useState } from 'react';
-import { XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts';
+import { XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, Brush } from 'recharts';
 import { LottoDraw } from '../types';
+import { predictNextSum } from '../utils';
 
 interface Props {
   history: LottoDraw[];
@@ -37,41 +38,72 @@ const StatsView: React.FC<Props> = ({ history }) => {
     return { data: heatmap, max: maxFreq };
   }, [history]);
 
-  const sumTrendData = useMemo(() => {
-    return [...history].reverse().slice(-50).map(d => ({
-      date: d.date.split('-').slice(1).join('/'),
+  // All history for the chart
+  const fullSumTrendData = useMemo(() => {
+    return [...history].reverse().map(d => ({
+      date: d.date,
       sum: d.front.reduce((a, b) => a + b, 0),
       id: d.id
     }));
   }, [history]);
 
+  const nextPredictedSum = useMemo(() => predictNextSum(history), [history]);
+
   const [activePosTab, setActivePosTab] = useState(0);
 
   return (
     <div className="space-y-6 pb-4">
-      {/* Sum Trend Chart */}
+      {/* Sum Trend Chart & Prediction */}
       <section className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100">
-        <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
-          <span>前区和值走势</span>
-          <span className="text-[10px] text-slate-400 font-bold px-2 py-0.5 bg-slate-100 rounded">近50期</span>
-        </h3>
-        <div className="h-48 w-full">
+        <div className="flex flex-col gap-2 mb-6">
+          <h3 className="font-bold text-slate-800 flex items-center justify-between">
+            <span>前区和值全量走势</span>
+            <span className="text-[10px] text-slate-400 font-bold px-2 py-0.5 bg-slate-100 rounded">拖动下方滑块缩放</span>
+          </h3>
+          
+          {/* Prediction Card */}
+          <div className="mt-2 bg-indigo-50 border border-indigo-100 p-3 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center font-bold shadow-md">
+                AI
+              </div>
+              <div>
+                <p className="text-[10px] text-indigo-400 font-bold uppercase">下期预测和值</p>
+                <p className="text-lg font-black text-indigo-900 leading-none">{nextPredictedSum}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-[9px] text-indigo-400 italic">基于近30期趋势分析</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="h-64 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={sumTrendData}>
+            <LineChart data={fullSumTrendData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="date" hide />
+              <XAxis dataKey="id" hide />
               <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
               <Tooltip 
                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 labelStyle={{ fontWeight: 'bold', fontSize: '10px' }}
+                formatter={(value: number) => [`和值: ${value}`, '数据']}
               />
               <Line 
                 type="monotone" 
                 dataKey="sum" 
                 stroke="#6366f1" 
                 strokeWidth={2} 
-                dot={{ r: 2, fill: '#6366f1' }}
+                dot={false}
+                activeDot={{ r: 4, strokeWidth: 0 }}
                 animationDuration={1000}
+              />
+              <Brush 
+                dataKey="id" 
+                height={24} 
+                stroke="#6366f1" 
+                startIndex={Math.max(0, fullSumTrendData.length - 100)}
+                fill="#f8fafc"
               />
             </LineChart>
           </ResponsiveContainer>

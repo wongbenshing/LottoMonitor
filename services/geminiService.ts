@@ -41,20 +41,23 @@ export const parseHistoryData = async (rawText: string): Promise<LottoDraw[]> =>
   }
 };
 
-export const getSmartAnalysis = async (history: LottoDraw[]): Promise<AnalysisSummary> => {
+export const getSmartAnalysis = async (history: LottoDraw[], predictedSum?: number): Promise<AnalysisSummary> => {
   const simplifiedHistory = history.slice(0, 50).map(h => `${h.id}: ${h.front.join(',')}+${h.back.join(',')}`).join('\n');
   
   const response = await ai.models.generateContent({
     model: "gemini-3-pro-preview",
-    contents: `基于以下最近50期的大乐透数据，请进行智能分析。
+    contents: `基于以下最近50期的大乐透数据进行深度智能分析。
     
+    【预测参考值】：
+    本系统时间序列分析建议下一期的“前区和值”目标大约为：${predictedSum || '未知'}。请在推荐号码时尽量使前区5个数字之和接近此值。
+
     【重要参考准则】：
-    历史统计发现，任意固定组合在中奖历史中的“最高奖金级别”大概率只有15元（即九等奖）。请在分析时保持理性，不要过度拟合大奖规律，而是寻找最符合当前概率分布和“和值”走势的组合。
+    历史统计发现，任意固定组合在中奖历史中的“最高奖金级别”大概率只有15元（即九等奖）。请在分析时保持理性，不要过度拟合大奖规律，而是寻找最符合当前概率分布、奇偶平衡及“和值”走势的组合。
     
     1. 识别前区（1-35）和后区（1-12）的冷热号码。
-    2. 计算近期的“前区和值”趋势。
+    2. 结合给出的预测和值目标，计算概率上最合理的组合。
     3. 提供一组最符合概率平衡的推荐号码（5+2）。
-    4. 给出简短的分析理由，包含对“15元定律”的考量。
+    4. 给出简短的分析理由，包含对和值及“15元定律”的考量。
     
     历史数据摘要：
     ${simplifiedHistory}`,

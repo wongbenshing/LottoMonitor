@@ -32,7 +32,7 @@ const AIView: React.FC<Props> = ({ history, analysis, setAnalysis }) => {
   const [inputSumMax, setInputSumMax] = useState<string>(sumTransitionResult.bestInterval.max.toString());
   const [inputRangeMin, setInputRangeMin] = useState<string>(rangeTransitionResult.bestInterval.min.toString());
   const [inputRangeMax, setInputRangeMax] = useState<string>(rangeTransitionResult.bestInterval.max.toString());
-  const [inputCount, setInputCount] = useState<string>("1");
+  const [inputCount, setInputCount] = useState<string>("2");
   
   const [selectedConsecutive, setSelectedConsecutive] = useState<number[]>([consecutiveTransitionResult.bestInterval.index]);
   const [selectedFrontRepeat, setSelectedFrontRepeat] = useState<number[]>([frontRepeatTransitionResult.bestInterval.index]);

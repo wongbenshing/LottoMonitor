@@ -6,6 +6,7 @@ import AnalyzerView from './components/AnalyzerView';
 import StatsView from './components/StatsView';
 import AIView from './components/AIView';
 import WalkForwardView from './components/WalkForwardView';
+import GuessView from './components/GuessView';
 import BottomNav from './components/BottomNav';
 import { fetchServerCSV } from './services/lottoService';
 import { crawlLottoHistory, fetchLocalCSV } from './services/lottoService';
@@ -125,6 +126,8 @@ const App: React.FC = () => {
         return <AIView history={history} analysis={aiAnalysis} setAnalysis={setAiAnalysis} />;
       case TabType.WALKFORWARD:
         return <WalkForwardView history={history} />;
+      case TabType.GUESS:
+        return <GuessView />;
       default:
         return <HistoryView history={history} onUpdate={updateHistory} isSyncing={isSyncing} onSync={triggerSync} />;
     }

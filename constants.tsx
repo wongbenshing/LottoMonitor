@@ -10,6 +10,12 @@ export const PRIZE_TIERS = [
   { tier: '7', name: '七等奖', condition: '3+0/2+1/1+2/0+2' },
 ];
 
+// v1.2 竞猜:固定奖金额表(1/2 等为浮动奖,取开奖数据 draw.prize1/prize2,无则 0)
+export const PRIZE_AMOUNTS: Record<string, number> = {
+  '3': 10000, '4': 3000, '5': 300, '6': 200, '7': 100,
+};
+export const PICK_COST = 2;   // 竞猜一条成本 2 元
+
 // Mock initial data to ensure the app works immediately
 export const INITIAL_DATA = [
   { id: "24025", date: "2024-03-04", front: [1, 5, 10, 20, 30], back: [2, 11] },

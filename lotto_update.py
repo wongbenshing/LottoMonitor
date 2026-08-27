@@ -14,6 +14,14 @@ HEADERS = {
 }
 
 
+def parse_money(td_text):
+    """'6,840,926' → 6840926; '--'/''/异常 → 0"""
+    try:
+        return int(td_text.replace(',', '').strip())
+    except (ValueError, AttributeError):
+        return 0
+
+
 def fetch_latest_draws():
     """从 500.com 抓取最新的开奖数据"""
     print(f"[{datetime.now()}] 正在启动爬虫任务...")
@@ -51,11 +59,15 @@ def fetch_latest_draws():
                     break
 
             if draw_id and draw_date:
+                # v1.2: 抓取一二等奖单注奖金(tds 索引: 9=一等注数 10=一等奖金 11=二等注数 12=二等奖金)
+                prize1 = parse_money(tds[10].get_text(strip=True)) if len(tds) > 12 else 0
+                prize2 = parse_money(tds[12].get_text(strip=True)) if len(tds) > 12 else 0
                 new_data.append({
                     'id': draw_id,
                     'date': draw_date,
                     'f1': front[0], 'f2': front[1], 'f3': front[2], 'f4': front[3], 'f5': front[4],
-                    'b1': back[0], 'b2': back[1]
+                    'b1': back[0], 'b2': back[1],
+                    'p1': prize1, 'p2': prize2
                 })
 
         return pd.DataFrame(new_data)
@@ -85,6 +97,15 @@ def update_csv():
     # 根据 ID 去重，保留第一次出现的（即新抓取的，虽然理论上数据应该一致）
     combined_df['id'] = combined_df['id'].astype(str)
     combined_df.drop_duplicates(subset=['id'], keep='first', inplace=True)
+
+    # v1.2: 旧 CSV 无 p1/p2 列时补齐(新数据 concat 后 NaN → 0)
+    if 'p1' not in combined_df.columns:
+        combined_df['p1'] = 0
+    if 'p2' not in combined_df.columns:
+        combined_df['p2'] = 0
+    combined_df = combined_df.fillna({'p1': 0, 'p2': 0})
+    combined_df['p1'] = combined_df['p1'].astype(int)
+    combined_df['p2'] = combined_df['p2'].astype(int)
 
     # 按照期号倒序排列
     combined_df['id_int'] = combined_df['id'].astype(int)

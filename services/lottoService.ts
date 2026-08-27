@@ -22,12 +22,18 @@ export const parseCSV = (csvText: string): LottoDraw[] => {
   return lines.map(line => {
     const parts = line.split(',');
     if (parts.length < 9) return null;
-    return {
+    const row: LottoDraw = {
       id: parts[0],
       date: parts[1],
       front: parts.slice(2, 7).map(n => parseInt(n)),
       back: parts.slice(7, 9).map(n => parseInt(n))
     };
+    // v1.2: 新列 p1/p2(一二等奖单注奖金),旧行缺省
+    if (parts.length >= 11) {
+      row.prize1 = parseInt(parts[9]) || 0;
+      row.prize2 = parseInt(parts[10]) || 0;
+    }
+    return row;
   }).filter((d): d is LottoDraw => d !== null);
 };
 

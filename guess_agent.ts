@@ -3,8 +3,10 @@
 // 每 5 分钟:history.csv 有新开奖 → 验证 pending 序列并回填奖金
 // 运行: npx tsx guess_agent.ts (cwd = 项目根,与 lotto_update.py 同款 nohup 部署)
 import { readFileSync, writeFileSync } from 'node:fs';
-import type { GuessRecord, LottoDraw } from './types';
-import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams } from './services/guessCore';
+import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { GuessRecord, GuessParams, LottoDraw } from './types';
+import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick } from './services/guessCore';
 import { parseCSV } from './services/lottoService';
 
 // node 运行时 process.env.API_KEY 需手动从 .env.local 加载(与 vite define 行为一致: ← GEMINI_API_KEY)
@@ -107,5 +109,92 @@ setInterval(() => {
     try { verifyPending(loadHistory()); } catch (e) { console.error('[guess] 验证失败:', e); }
   }
 }, 30_000);
+
+// ============ HTTP API(前端【加入竞猜】/【移出竞猜】写入通道)============
+const API_PORT = 3012;
+const EMPTY_PARAMS: GuessParams = {
+  sumMin: 0, sumMax: 0, rangeMin: 0, rangeMax: 0,
+  consecutive: [], frontRepeat: [], backRepeat: [], odd: [],
+};
+
+function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', c => { body += c; if (body.length > 1e6) reject(new Error('body too large')); });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) as Record<string, unknown> : {}); }
+      catch (e) { reject(e); }
+    });
+  });
+}
+
+function send(res: ServerResponse, code: number, data: unknown): void {
+  const payload = JSON.stringify(data);
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(payload);
+}
+
+/** 创建时回填 periodId(从 history 最新期号推算),返回最新记录数组 */
+function fillPeriodId(records: GuessRecord[]): GuessRecord[] {
+  const missing = records.find(r => r.periodId === '' && r.status === 'pending');
+  if (!missing) return records;
+  const hist = loadHistory();
+  if (hist.length === 0) return records;
+  return records.map(r => r.targetDate === missing.targetDate
+    ? { ...r, periodId: nextPeriodId(hist[0].id) } : r);
+}
+
+const server = createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    if (req.method === 'POST' && url.pathname === '/api/guess/add') {
+      const body = await readJson(req);
+      const targetDate = typeof body.targetDate === 'string' && body.targetDate
+        ? body.targetDate : nextOpenDate();
+      const numbers = Array.isArray(body.numbers) ? (body.numbers as unknown[]).map(Number) : null;
+      if (!numbers || numbers.length !== 7) {
+        return send(res, 400, { ok: false, error: 'numbers 必须为 7 个数字' });
+      }
+      try {
+        const params = (body.params && typeof body.params === 'object')
+          ? body.params as GuessParams : EMPTY_PARAMS;
+        const { records: next, pickIndex, alreadyExists } =
+          addPick(loadRecords(), targetDate, numbers, params);
+        const filled = fillPeriodId(next);
+        saveRecords(filled);
+        const rec = filled.find(r => r.targetDate === targetDate);
+        return send(res, 200, {
+          ok: true, targetDate, pickIndex,
+          picks: rec?.picks.length ?? 0, alreadyExists,
+        });
+      } catch (e) {
+        return send(res, 409, { ok: false, error: (e as Error).message });
+      }
+    }
+    if (req.method === 'POST' && url.pathname === '/api/guess/remove') {
+      const body = await readJson(req);
+      const targetDate = String(body.targetDate ?? '');
+      const pickIndex = Number(body.pickIndex);
+      if (!targetDate || Number.isNaN(pickIndex)) {
+        return send(res, 400, { ok: false, error: 'targetDate/pickIndex 必填' });
+      }
+      try {
+        const { records: next, removed } = removePick(loadRecords(), targetDate, pickIndex);
+        saveRecords(next);
+        const rec = next.find(r => r.targetDate === targetDate);
+        return send(res, 200, { ok: true, removed, picks: rec?.picks.length ?? 0 });
+      } catch (e) {
+        return send(res, 409, { ok: false, error: (e as Error).message });
+      }
+    }
+    return send(res, 404, { ok: false, error: 'not found' });
+  } catch (e) {
+    return send(res, 400, { ok: false, error: (e as Error).message });
+  }
+});
+
+server.listen(API_PORT, () => {
+  console.log(`[guess] API 服务已启动 :${API_PORT} (/api/guess/add, /api/guess/remove)`);
+});
 
 console.log(`[guess] 竞猜智能体已启动 ${new Date().toISOString()}:每日10:00自动选号,每5分钟验证开奖, 数据文件=${RECORDS_FILE}`);

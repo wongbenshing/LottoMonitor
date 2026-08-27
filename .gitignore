@@ -28,3 +28,5 @@ nohup.out
 __pycache__/
 *.pyc
 history.csv
+guess_records.json
+tsconfig.tsbuildinfo

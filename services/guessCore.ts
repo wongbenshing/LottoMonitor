@@ -1,6 +1,6 @@
 // 竞猜核心纯函数(前后端共用:前端统计展示,后端 guess_agent 验证/选号)
-import type { GuessRecord, GuessPickResult, GuessStats, LottoDraw } from '../types';
-import { checkPrize } from '../utils';
+import type { GuessParams, GuessRecord, GuessPickResult, GuessStats, LottoDraw } from '../types';
+import { checkPrize, calculateTransitionResult, calculateRangeTransitionResult, calculateConsecutiveTransitionResult, calculateFrontRepeatTransitionResult, calculateBackRepeatTransitionResult, calculateOddTransitionResult } from '../utils';
 import { PRIZE_AMOUNTS, PICK_COST } from '../constants';
 
 function fmtDate(d: Date): string {
@@ -78,4 +78,19 @@ export function parseGuessJson(text: string): GuessRecord[] {
   } catch {
     return [];
   }
+}
+
+/** 选号参数自动计算(与 AIView 一致,复用 6 个转移矩阵的最佳区间/选项) */
+export function computeBestParams(history: LottoDraw[]): GuessParams {
+  const sum = calculateTransitionResult(history).bestInterval;
+  const range = calculateRangeTransitionResult(history).bestInterval;
+  const consecutive = [calculateConsecutiveTransitionResult(history).bestInterval.index];
+  const frontRepeat = [calculateFrontRepeatTransitionResult(history).bestInterval.index];
+  const backRepeat = [calculateBackRepeatTransitionResult(history).bestInterval.index];
+  const odd = [calculateOddTransitionResult(history).bestInterval.index];
+  return {
+    sumMin: sum.min, sumMax: sum.max,
+    rangeMin: range.min, rangeMax: range.max,
+    consecutive, frontRepeat, backRepeat, odd,
+  };
 }

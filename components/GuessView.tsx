@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { GuessRecord, GuessStats } from '../types';
-import { fetchGuessRecords } from '../services/guessService';
+import { fetchGuessRecords, removePickFromGuess } from '../services/guessService';
 import { computeGuessStats } from '../services/guessCore';
 import { PICK_COST } from '../constants';
 
@@ -23,6 +23,17 @@ const GuessView: React.FC = () => {
   };
 
   useEffect(() => { load(); }, []);
+
+  // 移出一组竞猜(已开奖期会被后端拒绝)
+  const handleRemovePick = async (targetDate: string, pickIndex: number) => {
+    if (!window.confirm(`确认将第 ${pickIndex + 1} 组移出 ${targetDate} 的竞猜?`)) return;
+    const res = await removePickFromGuess(targetDate, pickIndex);
+    if (res.ok) {
+      load();
+    } else {
+      alert(`移出失败: ${res.error ?? '未知错误'}`);
+    }
+  };
 
   const stats: GuessStats = computeGuessStats(records);
   const nextRec = records.filter(r => r.status === 'pending').sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
@@ -63,6 +74,12 @@ const GuessView: React.FC = () => {
                       <span key={j} className="w-8 h-8 rounded-full bg-indigo-600 text-white text-sm font-black flex items-center justify-center">{n}</span>
                     ))}
                     <span className="text-[10px] text-slate-400 ml-2">和值{sum} · 极差{range}</span>
+                    <button
+                      onClick={() => handleRemovePick(nextRec.targetDate, i)}
+                      className="ml-auto text-[10px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 transition-all"
+                    >
+                      移出竞猜
+                    </button>
                   </div>
                 );
               })}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LottoDraw, AnalysisSummary } from '../types';
 import { getSmartAnalysis, cancelDeepSeekRequest } from '../services/deepseekService';
 import { calculateHistoricalPrizes, calculateTransitionResult, calculateRangeTransitionResult, calculateConsecutiveTransitionResult, calculateFrontRepeatTransitionResult, calculateBackRepeatTransitionResult, calculateOddTransitionResult, findConsecutive, countIntersection, countOdd } from '../utils';
+import { addPickToGuess } from '../services/guessService';
 import { PredictionResult } from '../types';
 import * as htmlToImage from 'html-to-image';
 
@@ -15,6 +16,10 @@ const AIView: React.FC<Props> = ({ history, analysis, setAnalysis }) => {
   const [loading, setLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const captureRef = useRef<HTMLDivElement>(null);
+  // 已加入下期竞猜的组(以号码 join 为 key),会话内防重复
+  const [addedSet, setAddedSet] = useState<Set<string>>(new Set());
+  // 正在提交的组
+  const [addingKey, setAddingKey] = useState<string | null>(null);
   
   // Wake Lock 引用，防止屏幕熄屏
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -232,6 +237,38 @@ const AIView: React.FC<Props> = ({ history, analysis, setAnalysis }) => {
     }
   };
 
+  // 将一组选号加入下期竞猜(经 guess_agent API 写入服务器)
+  const handleAddToGuess = async (numbers: number[]) => {
+    const key = numbers.join(',');
+    if (addedSet.has(key) || addingKey === key) return;
+    setAddingKey(key);
+    try {
+      const params = {
+        sumMin: parseInt(inputSumMin) || 0,
+        sumMax: parseInt(inputSumMax) || 0,
+        rangeMin: parseInt(inputRangeMin) || 0,
+        rangeMax: parseInt(inputRangeMax) || 0,
+        consecutive: selectedConsecutive,
+        frontRepeat: selectedFrontRepeat,
+        backRepeat: selectedBackRepeat,
+        odd: selectedOdd,
+      };
+      const res = await addPickToGuess(numbers, params);
+      if (res.ok) {
+        if (res.alreadyExists) {
+          alert('该组号码已在竞猜列表中');
+        } else {
+          setAddedSet(prev => new Set(prev).add(key));
+          alert(`已加入竞猜(目标期 ${res.targetDate}, 共${res.picks}组)`);
+        }
+      } else {
+        alert(`加入失败: ${res.error ?? '未知错误'}`);
+      }
+    } finally {
+      setAddingKey(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* 交互输入区 */}
@@ -439,6 +476,17 @@ const AIView: React.FC<Props> = ({ history, analysis, setAnalysis }) => {
                   <div key={idx} className="bg-white/5 p-5 rounded-3xl border border-white/10 hover:bg-white/10 transition-colors">
                     <div className="flex justify-between items-center mb-4">
                       <span className="text-[10px] font-black bg-indigo-500 px-2 py-0.5 rounded uppercase tracking-widest">推荐方案 #{idx + 1}</span>
+                      <button
+                        onClick={() => handleAddToGuess(rec)}
+                        disabled={addedSet.has(rec.join(',')) || addingKey === rec.join(',')}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all ${
+                          addedSet.has(rec.join(','))
+                            ? 'bg-emerald-500/20 text-emerald-300 cursor-default'
+                            : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/40 active:scale-95'
+                        } ${addingKey === rec.join(',') ? 'opacity-50' : ''}`}
+                      >
+                        {addedSet.has(rec.join(',')) ? '✓ 已加入竞猜' : addingKey === rec.join(',') ? '加入中...' : '＋ 加入竞猜'}
+                      </button>
                     </div>
                     
                     <div className="flex gap-2 justify-center mb-4">

@@ -4,6 +4,8 @@ import {
   nextPeriodId,
   verifyRecord,
   computeGuessStats,
+  addPick,
+  removePick,
 } from '../guessCore';
 import type { GuessRecord, LottoDraw } from '../../types';
 
@@ -109,5 +111,55 @@ describe('computeGuessStats', () => {
     const stats = computeGuessStats([mkRec('2026-08-29', [[1, 2, 3, 4, 5, 6, 7]])]);
     expect(stats.totalPicks).toBe(0);
     expect(stats.roi).toBe(0);
+  });
+});
+
+describe('addPick', () => {
+  it('目标期无记录时创建新记录(pickIndex=0)', () => {
+    const { records, pickIndex, alreadyExists } = addPick([], '2026-08-29', [1, 9, 22, 24, 27, 4, 8], EMPTY_PARAMS);
+    expect(pickIndex).toBe(0);
+    expect(alreadyExists).toBe(false);
+    expect(records).toHaveLength(1);
+    expect(records[0].targetDate).toBe('2026-08-29');
+    expect(records[0].status).toBe('pending');
+    expect(records[0].picks).toEqual([[1, 9, 22, 24, 27, 4, 8]]);
+  });
+
+  it('已有 2 条记录时追加第 3 条(pickIndex=2);重复组 alreadyExists=true 不写入', () => {
+    const base = mkRec('2026-08-29', [[1, 9, 22, 24, 27, 4, 8], [1, 14, 21, 23, 28, 5, 11]]);
+    const r1 = addPick([base], '2026-08-29', [3, 11, 15, 22, 31, 5, 9], EMPTY_PARAMS);
+    expect(r1.pickIndex).toBe(2);
+    expect(r1.alreadyExists).toBe(false);
+    expect(r1.records[0].picks).toHaveLength(3);
+    const r2 = addPick(r1.records, '2026-08-29', [1, 9, 22, 24, 27, 4, 8], EMPTY_PARAMS);
+    expect(r2.alreadyExists).toBe(true);
+    expect(r2.pickIndex).toBe(-1);
+    expect(r2.records[0].picks).toHaveLength(3);
+  });
+
+  it('verified 期抛错(调用方映射 409)', () => {
+    const verified = { ...mkRec('2026-08-26', [[1, 2, 3, 4, 5, 6, 7]]), status: 'verified' as const, drawId: '26097' };
+    expect(() => addPick([verified], '2026-08-26', [3, 11, 15, 22, 31, 5, 9], EMPTY_PARAMS)).toThrow('已开奖');
+  });
+});
+
+describe('removePick', () => {
+  it('移除中间一组后索引重排;移空则删整条记录', () => {
+    const base = mkRec('2026-08-29', [[1, 9, 22, 24, 27, 4, 8], [1, 14, 21, 23, 28, 5, 11], [3, 11, 15, 22, 31, 5, 9]]);
+    const r1 = removePick([base], '2026-08-29', 1);
+    expect(r1.removed).toBe(true);
+    expect(r1.records[0].picks).toEqual([[1, 9, 22, 24, 27, 4, 8], [3, 11, 15, 22, 31, 5, 9]]);
+    const r2 = removePick(r1.records, '2026-08-29', 0);
+    const r3 = removePick(r2.records, '2026-08-29', 0);
+    expect(r3.removed).toBe(true);
+    expect(r3.records).toHaveLength(0); // 移空 → 整条删除
+  });
+
+  it('verified 期抛错;越界 pickIndex 返回 removed=false;不存在的期 removed=false', () => {
+    const verified = { ...mkRec('2026-08-26', [[1, 2, 3, 4, 5, 6, 7]]), status: 'verified' as const };
+    expect(() => removePick([verified], '2026-08-26', 0)).toThrow('已开奖');
+    const base = mkRec('2026-08-29', [[1, 2, 3, 4, 5, 6, 7]]);
+    expect(removePick([base], '2026-08-29', 5).removed).toBe(false);
+    expect(removePick([base], '2026-09-01', 0).removed).toBe(false);
   });
 });

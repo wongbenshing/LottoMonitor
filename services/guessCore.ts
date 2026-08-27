@@ -94,3 +94,45 @@ export function computeBestParams(history: LottoDraw[]): GuessParams {
     consecutive, frontRepeat, backRepeat, odd,
   };
 }
+
+/** 加入一组到下期竞猜(目标期已开奖则抛错)。返回 {records, pickIndex, alreadyExists} */
+export function addPick(
+  records: GuessRecord[], targetDate: string, numbers: number[],
+  params: GuessParams, now: Date = new Date()
+): { records: GuessRecord[]; pickIndex: number; alreadyExists: boolean } {
+  const existing = records.find(r => r.targetDate === targetDate);
+  if (existing?.status === 'verified') {
+    throw new Error('该期已开奖,不能修改');
+  }
+  if (existing) {
+    const dup = existing.picks.findIndex(p => JSON.stringify(p) === JSON.stringify(numbers));
+    if (dup >= 0) return { records, pickIndex: -1, alreadyExists: true };
+    return {
+      records: records.map(r => r.targetDate === targetDate
+        ? { ...r, picks: [...r.picks, numbers] } : r),
+      pickIndex: existing.picks.length,
+      alreadyExists: false,
+    };
+  }
+  const rec: GuessRecord = {
+    targetDate, periodId: '', picks: [numbers], params,
+    createdAt: now.toISOString(), status: 'pending',
+  };
+  return { records: [...records, rec], pickIndex: 0, alreadyExists: false };
+}
+
+/** 移除一组并重排索引;移空则删除整条记录。返回 {records, removed} */
+export function removePick(
+  records: GuessRecord[], targetDate: string, pickIndex: number
+): { records: GuessRecord[]; removed: boolean } {
+  const idx = records.findIndex(r => r.targetDate === targetDate);
+  if (idx < 0) return { records, removed: false };
+  const rec = records[idx];
+  if (rec.status === 'verified') throw new Error('该期已开奖,不能修改');
+  if (pickIndex < 0 || pickIndex >= rec.picks.length) return { records, removed: false };
+  const picks = rec.picks.filter((_, i) => i !== pickIndex);
+  const updated = picks.length === 0
+    ? records.filter((_, i) => i !== idx)          // 移空 → 删整条
+    : records.map((r, i) => i === idx ? { ...r, picks } : r);
+  return { records: updated, removed: true };
+}

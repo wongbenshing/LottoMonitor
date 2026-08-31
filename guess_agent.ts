@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { GuessRecord, GuessParams, LottoDraw } from './types';
-import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick } from './services/guessCore';
+import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate } from './services/guessCore';
 import { parseCSV } from './services/lottoService';
 
 // node 运行时 process.env.API_KEY 需手动从 .env.local 加载(与 vite define 行为一致: ← GEMINI_API_KEY)
@@ -150,7 +150,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/guess/add') {
       const body = await readJson(req);
       const targetDate = typeof body.targetDate === 'string' && body.targetDate
-        ? body.targetDate : nextOpenDate();
+        ? body.targetDate : currentOpenDate();   // v1.1.1: 开奖日当天未开奖 → 今天
       const numbers = Array.isArray(body.numbers) ? (body.numbers as unknown[]).map(Number) : null;
       if (!numbers || numbers.length !== 7) {
         return send(res, 400, { ok: false, error: 'numbers 必须为 7 个数字' });

@@ -21,6 +21,19 @@ export function nextOpenDate(from: Date = new Date()): string {
   return fmtDate(d);
 }
 
+/** 大乐透开奖时间 21:25(分钟制,>= 视为已开奖) */
+export const DRAW_CUTOFF_MINUTES = 21 * 60 + 25;
+
+/** 当前开放竞猜的开奖日:今天是开奖日(周一/三/六)且未到开奖时间 → 今天;否则下一开奖日 */
+export function currentOpenDate(from: Date = new Date()): string {
+  const day = from.getDay();
+  if ((day === 1 || day === 3 || day === 6)
+    && from.getHours() * 60 + from.getMinutes() < DRAW_CUTOFF_MINUTES) {
+    return fmtDate(from);
+  }
+  return nextOpenDate(from);
+}
+
 /** 期号推算:最新期号 +1,后三位 >156 进位到次年(大乐透每年约 156 期) */
 export function nextPeriodId(latestId: string): string {
   const m = latestId.match(/^(\d{2})(\d{3})$/);

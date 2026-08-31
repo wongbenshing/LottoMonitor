@@ -6,6 +6,8 @@ import {
   computeGuessStats,
   addPick,
   removePick,
+  currentOpenDate,
+  DRAW_CUTOFF_MINUTES,
 } from '../guessCore';
 import type { GuessRecord, LottoDraw } from '../../types';
 
@@ -24,6 +26,23 @@ describe('nextOpenDate', () => {
     expect(nextOpenDate(new Date('2026-08-28T10:00:00'))).toBe('2026-08-29'); // 周五→周六
     expect(nextOpenDate(new Date('2026-08-30T10:00:00'))).toBe('2026-08-31'); // 周日→周一
     expect(nextOpenDate(new Date('2026-08-31T10:00:00'))).toBe('2026-09-02'); // 周一→周三
+  });
+});
+
+describe('currentOpenDate(开奖日当天手动加入的目标期)', () => {
+  it('开奖日 21:25 前 → 今天(2026-08-31 周一下午 → 08-31)', () => {
+    expect(currentOpenDate(new Date('2026-08-31T16:00:00'))).toBe('2026-08-31');
+    expect(currentOpenDate(new Date('2026-08-29T20:00:00'))).toBe('2026-08-29'); // 周六
+  });
+  it('开奖日 21:25 及之后 → 下一开奖日(周一晚 22:00 → 周三)', () => {
+    expect(currentOpenDate(new Date('2026-08-31T21:25:00'))).toBe('2026-09-02');
+    expect(currentOpenDate(new Date('2026-08-31T22:00:00'))).toBe('2026-09-02');
+  });
+  it('非开奖日 → 下一开奖日(周二 → 周三)', () => {
+    expect(currentOpenDate(new Date('2026-09-01T12:00:00'))).toBe('2026-09-02');
+  });
+  it('常量 21:25', () => {
+    expect(DRAW_CUTOFF_MINUTES).toBe(21 * 60 + 25);
   });
 });
 

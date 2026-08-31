@@ -93,6 +93,12 @@ describe('verifyRecord', () => {
     expect(v.results![0].tier).toBe('1');
     expect(v.results![0].amount).toBe(0); // 无 prize1 → 0
   });
+
+  it('验证时 periodId 回填为真实开奖期号(draw.id)', () => {
+    const rec = mkRec('2026-08-31', [[3, 11, 15, 22, 31, 5, 9]]); // periodId 占位 26098
+    const v = verifyRecord(rec, { ...draw, id: '26099', date: '2026-08-31' });
+    expect(v.periodId).toBe('26099');
+  });
 });
 
 describe('computeGuessStats', () => {

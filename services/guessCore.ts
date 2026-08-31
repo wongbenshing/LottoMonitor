@@ -56,6 +56,7 @@ export function verifyRecord(record: GuessRecord, draw: LottoDraw): GuessRecord 
   return {
     ...record,
     status: 'verified',
+    periodId: draw.id,   // v1.1.1: 回填真实期号(创建时按最新期+1推算可能落后一期)
     drawId: draw.id,
     results,
     totalPrize: results.reduce((s, r) => s + r.amount, 0),

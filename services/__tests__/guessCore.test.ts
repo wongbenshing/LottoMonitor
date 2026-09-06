@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { checkPrize } from '../../utils';
 import {
   nextOpenDate,
   nextPeriodId,
@@ -84,6 +85,26 @@ describe('verifyRecord', () => {
     expect(v.results![0].tier).toBe('3');
     expect(v.results![0].amount).toBe(10000);
     expect(v.totalPrize).toBe(10000);
+  });
+
+  it('v1.2.4 奖级修正: 2+1=九等奖5元(曾误判七等奖100), 3+1=八等奖15, 4+0=七等奖100, 4+1=五等奖300', () => {
+    // 开奖 3,11,15,22,31 + 5,9
+    // 2+1 → 九等奖 5 元(用户报告案例: 前区中2 后区中1)
+    expect(checkPrize([3, 11, 40, 41, 42], [5, 2], draw)).toBe('9');
+    // 3+1 → 八等奖 15 元
+    expect(checkPrize([3, 11, 15, 40, 41], [5, 2], draw)).toBe('8');
+    // 2+2 → 八等奖 15 元
+    expect(checkPrize([3, 11, 40, 41, 42], [5, 9], draw)).toBe('8');
+    // 4+0 → 七等奖 100 元
+    expect(checkPrize([3, 11, 15, 22, 40], [1, 2], draw)).toBe('7');
+    // 3+2 → 六等奖 200 元
+    expect(checkPrize([3, 11, 15, 40, 41], [5, 9], draw)).toBe('6');
+    // 4+1 → 五等奖 300 元
+    expect(checkPrize([3, 11, 15, 22, 40], [5, 2], draw)).toBe('5');
+    // 4+2 → 四等奖 3000 元
+    expect(checkPrize([3, 11, 15, 22, 40], [5, 9], draw)).toBe('4');
+    // 5+0 → 三等奖 10000 元
+    expect(checkPrize([3, 11, 15, 22, 31], [1, 2], draw)).toBe('3');
   });
 
   it('开奖无奖金数据(旧CSV)时一等奖按0计,不报错', () => {

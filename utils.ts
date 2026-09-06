@@ -70,17 +70,22 @@ export interface TransitionResult {
   maxScore: number;            // 最高加权平均分
 }
 
+// 大乐透官方奖级(2019 新规 9 奖级): 1/2 浮动, 3:10000, 4:3000, 5:300, 6:200, 7:100, 8:15, 9:5
+// v1.2.4: 修正旧版 7 档错位(2+1 曾被误判为七等奖 100 元,实际九等奖 5 元)
 export const checkPrize = (userFront: number[], userBack: number[], draw: LottoDraw): string | null => {
   const frontMatch = userFront.filter(n => draw.front.includes(n)).length;
   const backMatch = userBack.filter(n => draw.back.includes(n)).length;
 
   if (frontMatch === 5 && backMatch === 2) return '1';
   if (frontMatch === 5 && backMatch === 1) return '2';
-  if ((frontMatch === 5 && backMatch === 0) || (frontMatch === 4 && backMatch === 2)) return '3';
-  if (frontMatch === 4 && backMatch === 1) return '4';
-  if ((frontMatch === 4 && backMatch === 0) || (frontMatch === 3 && backMatch === 2)) return '5';
-  if ((frontMatch === 3 && backMatch === 1) || (frontMatch === 2 && backMatch === 2)) return '6';
-  if ((frontMatch === 3 && backMatch === 0) || (frontMatch === 2 && backMatch === 1) || (frontMatch === 1 && backMatch === 2) || (frontMatch === 0 && backMatch === 2)) return '7';
+  if (frontMatch === 5 && backMatch === 0) return '3';
+  if (frontMatch === 4 && backMatch === 2) return '4';
+  if (frontMatch === 4 && backMatch === 1) return '5';
+  if (frontMatch === 3 && backMatch === 2) return '6';
+  if (frontMatch === 4 && backMatch === 0) return '7';
+  if ((frontMatch === 3 && backMatch === 1) || (frontMatch === 2 && backMatch === 2)) return '8';
+  if ((frontMatch === 3 && backMatch === 0) || (frontMatch === 2 && backMatch === 1) ||
+      (frontMatch === 1 && backMatch === 2) || (frontMatch === 0 && backMatch === 2)) return '9';
 
   return null;
 };
@@ -94,6 +99,8 @@ export const calculateHistoricalPrizes = (userFront: number[], userBack: number[
     '5': { tier: '5', name: '五等奖', count: 0, dates: [] },
     '6': { tier: '6', name: '六等奖', count: 0, dates: [] },
     '7': { tier: '7', name: '七等奖', count: 0, dates: [] },
+    '8': { tier: '8', name: '八等奖', count: 0, dates: [] },
+    '9': { tier: '9', name: '九等奖', count: 0, dates: [] },
   };
 
   history.forEach(draw => {

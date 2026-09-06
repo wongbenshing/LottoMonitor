@@ -170,8 +170,11 @@ const GuessView: React.FC = () => {
                     ) : (
                       <span className="text-xs font-bold text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">✗ 未中奖</span>
                     )}
-                    <span className={`ml-auto text-sm font-black ${prize > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                      {prize > 0 ? `+${fmtMoney(prize)}` : '−'}{fmtMoney(rec.picks.length * PICK_COST)}
+                    <span className="ml-auto text-sm font-black whitespace-nowrap">
+                      {prize > 0 && <span className="text-emerald-600">+{fmtMoney(prize)}</span>}
+                      <span className={prize > 0 ? 'text-slate-500 ml-1.5' : 'text-slate-400'}>
+                        −{fmtMoney(rec.picks.length * PICK_COST)}
+                      </span>
                     </span>
                   </button>
                   {open && (

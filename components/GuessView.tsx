@@ -7,7 +7,7 @@ import { PICK_COST } from '../constants';
 
 const TIER_NAMES: Record<string, string> = {
   '1': '一等奖', '2': '二等奖', '3': '三等奖', '4': '四等奖',
-  '5': '五等奖', '6': '六等奖', '7': '七等奖', '8': '八等奖', '9': '九等奖',
+  '5': '五等奖', '6': '六等奖', '7': '七等奖',
 };
 
 const fmtMoney = (n: number): string => n >= 10000 ? `¥${(n / 10000).toFixed(2)}万` : `¥${n.toLocaleString()}`;

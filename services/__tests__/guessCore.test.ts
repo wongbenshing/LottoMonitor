@@ -62,11 +62,11 @@ describe('verifyRecord', () => {
     prize1: 6840926, prize2: 84016,
   };
 
-  it('5+2 中一等奖(取真实 prize1)、3+1 中六等 200 元、未中 0', () => {
+  it('5+2 中一等奖(取真实 prize1)、未中 0', () => {
     const rec = mkRec('2026-08-29', [
       [3, 11, 15, 22, 31, 5, 9],   // 5+2 → 一等奖
       [1, 2, 3, 4, 5, 6, 7],       // 未中
-      [8, 9, 10, 11, 12, 1, 2],    // 前区8,9,10,11,12 vs 3,11,15,22,31 → 1个; 后区1,2 vs 5,9 → 0 → 未中? 重新核对:前区匹配=11→1个,后区0 → 无奖
+      [8, 9, 10, 11, 12, 1, 2],    // 前区匹配 11 → 1个, 后区0 → 无奖
     ]);
     const v = verifyRecord(rec, draw);
     expect(v.status).toBe('verified');
@@ -78,33 +78,46 @@ describe('verifyRecord', () => {
     expect(v.totalPrize).toBe(6840926);
   });
 
-  it('5+0 中三等奖 10000 元', () => {
-    const rec = mkRec('2026-08-29', [[3, 11, 15, 22, 31, 1, 2]]); // 后区1,2 → 0命中? 需构造3+1
-    // 前区 3,11,15,22,31 与开奖 3,11,15,22,31 → 5;后区 1,2 vs 5,9 → 0 → 三等奖(5+0)
+  it('5+0 中三等奖(2026新规默认 5000;旧规应为 10000)', () => {
+    const rec = mkRec('2026-08-29', [[3, 11, 15, 22, 31, 1, 2]]); // 5前 + 0后
     const v = verifyRecord(rec, draw);
     expect(v.results![0].tier).toBe('3');
-    expect(v.results![0].amount).toBe(10000);
-    expect(v.totalPrize).toBe(10000);
+    expect(v.results![0].amount).toBe(5000); // 新规低档兜底(官方未提供 p3 时)
+    expect(v.totalPrize).toBe(5000);
+    // 旧规期(24001): 5+0 → 三等 10000
+    const oldDraw: LottoDraw = { id: '24001', date: '2024-01-01', front: [3, 11, 15, 22, 31], back: [5, 9] };
+    const v2 = verifyRecord(mkRec('2024-01-01', [[3, 11, 15, 22, 31, 1, 2]]), oldDraw);
+    expect(v2.results![0].amount).toBe(10000);
   });
 
-  it('v1.2.4 奖级修正: 2+1=九等奖5元(曾误判七等奖100), 3+1=八等奖15, 4+0=七等奖100, 4+1=五等奖300', () => {
-    // 开奖 3,11,15,22,31 + 5,9
-    // 2+1 → 九等奖 5 元(用户报告案例: 前区中2 后区中1)
-    expect(checkPrize([3, 11, 40, 41, 42], [5, 2], draw)).toBe('9');
-    // 3+1 → 八等奖 15 元
-    expect(checkPrize([3, 11, 15, 40, 41], [5, 2], draw)).toBe('8');
-    // 2+2 → 八等奖 15 元
-    expect(checkPrize([3, 11, 40, 41, 42], [5, 9], draw)).toBe('8');
-    // 4+0 → 七等奖 100 元
-    expect(checkPrize([3, 11, 15, 22, 40], [1, 2], draw)).toBe('7');
-    // 3+2 → 六等奖 200 元
-    expect(checkPrize([3, 11, 15, 40, 41], [5, 9], draw)).toBe('6');
-    // 4+1 → 五等奖 300 元
-    expect(checkPrize([3, 11, 15, 22, 40], [5, 2], draw)).toBe('5');
-    // 4+2 → 四等奖 3000 元
-    expect(checkPrize([3, 11, 15, 22, 40], [5, 9], draw)).toBe('4');
-    // 5+0 → 三等奖 10000 元
-    expect(checkPrize([3, 11, 15, 22, 31], [1, 2], draw)).toBe('3');
+  it('v1.2.5 2026新规七奖级(26098期): 2+1=七等, 3+1/2+2=六等, 4+0/3+2=五等, 4+1=四等, 4+2/5+0=三等', () => {
+    // 开奖 3,11,15,22,31 + 5,9 (新规期)
+    expect(checkPrize([3, 11, 40, 41, 42], [5, 2], draw)).toBe('7');   // 2+1
+    expect(checkPrize([3, 11, 15, 40, 41], [5, 2], draw)).toBe('6');   // 3+1
+    expect(checkPrize([3, 11, 40, 41, 42], [5, 9], draw)).toBe('6');   // 2+2
+    expect(checkPrize([3, 11, 15, 22, 40], [1, 2], draw)).toBe('5');   // 4+0
+    expect(checkPrize([3, 11, 15, 40, 41], [5, 9], draw)).toBe('5');   // 3+2
+    expect(checkPrize([3, 11, 15, 22, 40], [5, 2], draw)).toBe('4');   // 4+1
+    expect(checkPrize([3, 11, 15, 22, 40], [5, 9], draw)).toBe('3');   // 4+2
+    expect(checkPrize([3, 11, 15, 22, 31], [1, 2], draw)).toBe('3');   // 5+0
+    // 旧规期(24001): 同样条件映射到 9 级
+    const oldDraw: LottoDraw = { id: '24001', date: '2024-01-01', front: [3, 11, 15, 22, 31], back: [5, 9] };
+    expect(checkPrize([3, 11, 40, 41, 42], [5, 2], oldDraw)).toBe('9');  // 2+1 旧=九等
+    expect(checkPrize([3, 11, 15, 22, 40], [1, 2], oldDraw)).toBe('7');  // 4+0 旧=七等
+    expect(checkPrize([3, 11, 15, 22, 40], [5, 9], oldDraw)).toBe('4');  // 4+2 旧=四等
+  });
+
+  it('官方当期固定奖金额优先(draw.prize3..7,奖池≥8亿高档期如 6666/380/200/18/7)', () => {
+    const highDraw: LottoDraw = { ...draw, id: '26100', date: '2026-09-02', prize3: 6666, prize4: 380, prize5: 200, prize6: 18, prize7: 7 };
+    const rec = mkRec('2026-09-02', [
+      [3, 11, 15, 22, 31, 1, 2],  // 5+0 三等 → 6666
+      [3, 11, 40, 41, 42, 5, 2],  // 2+1 七等 → 7
+    ]);
+    const v = verifyRecord(rec, highDraw);
+    expect(v.results![0].tier).toBe('3');
+    expect(v.results![0].amount).toBe(6666);
+    expect(v.results![1].tier).toBe('7');
+    expect(v.results![1].amount).toBe(7);
   });
 
   it('开奖无奖金数据(旧CSV)时一等奖按0计,不报错', () => {

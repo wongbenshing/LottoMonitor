@@ -33,6 +33,22 @@ export const parseCSV = (csvText: string): LottoDraw[] => {
       row.prize1 = parseInt(parts[9]) || 0;
       row.prize2 = parseInt(parts[10]) || 0;
     }
+    // v1.2.5: 官方接口新列 poolAfter,p3..p7(固定奖当期实际金额),空值/旧行 → undefined
+    const numOrUndef = (s: string | undefined): number | undefined => {
+      if (s === undefined || s.trim() === '') return undefined;
+      const v = parseInt(s);
+      return isNaN(v) ? undefined : v;
+    };
+    if (parts.length >= 12) {
+      row.poolAfter = numOrUndef(parts[11]);
+    }
+    if (parts.length >= 17) {
+      row.prize3 = numOrUndef(parts[12]) ?? 0;
+      row.prize4 = numOrUndef(parts[13]) ?? 0;
+      row.prize5 = numOrUndef(parts[14]) ?? 0;
+      row.prize6 = numOrUndef(parts[15]) ?? 0;
+      row.prize7 = numOrUndef(parts[16]) ?? 0;
+    }
     return row;
   }).filter((d): d is LottoDraw => d !== null);
 };

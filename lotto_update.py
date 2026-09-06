@@ -8,67 +8,88 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 # 配置
 CSV_FILE = os.getcwd() + os.sep + 'history.csv'
-TARGET_URL = "https://datachart.500.com/dlt/history/newinc/history.php?limit=50&sort=0"
+# v1.2.5: 数据源切换为体彩官方接口(webapi.sporttery.cn)
+# 返回每期: 开奖号码 + 一二等单注奖金 + 奖池 + 3~7等固定奖单注金额(2026新规后随奖池分档)
+API_URL = "https://webapi.sporttery.cn/gateway/lottery/getHistoryPageListV1.qry"
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+    'Referer': 'https://www.sporttery.cn/',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh;q=0.9'
 }
 
 
-def parse_money(td_text):
-    """'6,840,926' → 6840926; '--'/''/异常 → 0"""
+def parse_money(text):
+    """'6,840,926' / 6840926 / 692723356.75 → int; 异常 → 0"""
+    if text is None:
+        return 0
     try:
-        return int(td_text.replace(',', '').strip())
+        return int(float(str(text).replace(',', '').strip()))
     except (ValueError, AttributeError):
         return 0
 
 
-def fetch_latest_draws():
-    """从 500.com 抓取最新的开奖数据"""
-    print(f"[{datetime.now()}] 正在启动爬虫任务...")
+def fetch_latest_draws(page_size=30):
+    """从体彩官方接口抓取最近 page_size 期开奖(含各奖级单注奖金与奖池)"""
+    print(f"[{datetime.now()}] 正在从体彩官方接口抓取...")
     try:
-        response = requests.get(TARGET_URL, headers=HEADERS, timeout=15)
-        response.encoding = 'utf-8'
+        params = {
+            'gameNo': '85',          # 超级大乐透
+            'provinceId': '0',
+            'pageSize': str(page_size),
+            'isVerify': '1',
+            'pageNo': '1',
+        }
+        response = requests.get(API_URL, params=params, headers=HEADERS, timeout=20)
         if response.status_code != 200:
             print(f"请求失败，状态码: {response.status_code}")
             return None
 
-        soup = BeautifulSoup(response.text, 'html.parser')
-        rows = soup.select('tr.t_tr1')
+        data = response.json()
+        lst = (data.get('value') or {}).get('list') or []
+        if not lst:
+            print(f"接口返回空列表: {str(data)[:200]}")
+            return None
 
         new_data = []
-        for row in rows[1:]:
-            tds = row.find_all('td')
-            if len(tds) < 9:
+        for item in lst:
+            draw_id = str(item.get('lotteryDrawNum', '')).strip()
+            draw_time = str(item.get('lotteryDrawTime', ''))[:10]  # 'YYYY-MM-DD'
+            nums = [int(x) for x in str(item.get('lotteryDrawResult', '')).split() if x.strip()]
+            front, back = nums[:5], nums[5:7]
+            if not draw_id or not draw_time or len(front) != 5 or len(back) != 2:
+                print(f"[跳过] 字段异常: id={draw_id} date={draw_time} result={nums}")
                 continue
 
-            # 1. 提取期号
-            draw_id = tds[0].get_text(strip=True)
+            # 奖级金额: prizeLevelList 中 prizeLevel 为中文奖级名;跳过追加(prizeLevelRj)
+            prize = {'p1': 0, 'p2': 0, 'p3': 0, 'p4': 0, 'p5': 0, 'p6': 0, 'p7': 0}
+            for pl in item.get('prizeLevelList') or []:
+                level = str(pl.get('prizeLevel', ''))
+                amount = parse_money(pl.get('stakeAmount'))
+                if level == '一等奖':
+                    prize['p1'] = amount
+                elif level == '二等奖':
+                    prize['p2'] = amount
+                elif level == '三等奖':
+                    prize['p3'] = amount
+                elif level == '四等奖':
+                    prize['p4'] = amount
+                elif level == '五等奖':
+                    prize['p5'] = amount
+                elif level == '六等奖':
+                    prize['p6'] = amount
+                elif level == '七等奖':
+                    prize['p7'] = amount
 
-            # 2. 提取前区 5 个数字
-            front = [int(tds[i].get_text(strip=True)) for i in range(1, 6)]
-
-            # 3. 提取后区 2 个数字
-            back = [int(tds[i].get_text(strip=True)) for i in range(6, 8)]
-
-            # 4. 提取日期 (寻找 YYYY-MM-DD 格式)
-            draw_date = ""
-            for td in tds:
-                text = td.get_text(strip=True)
-                if re.match(r'^\d{4}-\d{2}-\d{2}$', text):
-                    draw_date = text
-                    break
-
-            if draw_id and draw_date:
-                # v1.2: 抓取一二等奖单注奖金(tds 索引: 9=一等注数 10=一等奖金 11=二等注数 12=二等奖金)
-                prize1 = parse_money(tds[10].get_text(strip=True)) if len(tds) > 12 else 0
-                prize2 = parse_money(tds[12].get_text(strip=True)) if len(tds) > 12 else 0
-                new_data.append({
-                    'id': draw_id,
-                    'date': draw_date,
-                    'f1': front[0], 'f2': front[1], 'f3': front[2], 'f4': front[3], 'f5': front[4],
-                    'b1': back[0], 'b2': back[1],
-                    'p1': prize1, 'p2': prize2
-                })
+            new_data.append({
+                'id': draw_id,
+                'date': draw_time,
+                'f1': front[0], 'f2': front[1], 'f3': front[2], 'f4': front[3], 'f5': front[4],
+                'b1': back[0], 'b2': back[1],
+                'p1': prize['p1'], 'p2': prize['p2'],
+                'pool': parse_money(item.get('poolBalanceAfterdraw')),
+                'p3': prize['p3'], 'p4': prize['p4'], 'p5': prize['p5'], 'p6': prize['p6'], 'p7': prize['p7'],
+            })
 
         return pd.DataFrame(new_data)
     except Exception as e:

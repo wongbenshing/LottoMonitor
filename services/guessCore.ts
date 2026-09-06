@@ -46,11 +46,20 @@ export function nextPeriodId(latestId: string): string {
 
 /** 验证一期:对每组选号用 checkPrize 判定,返回逐组结果 + 总奖金(1/2 等取开奖真实奖金) */
 export function verifyRecord(record: GuessRecord, draw: LottoDraw): GuessRecord {
+  // v1.2.5: 旧规(≤26013)固定奖默认表 10000/3000/300/200/100/15/5
+  const isNewRule = (parseInt(draw.id) >= 26014) || (draw.date >= '2026-02-02');
+  const OLD_FIXED: Record<string, number> = { '3': 10000, '4': 3000, '5': 300, '6': 200, '7': 100, '8': 15, '9': 5 };
   const results: GuessPickResult[] = record.picks.map((nums, i) => {
     const tier = checkPrize(nums.slice(0, 5), nums.slice(5, 7), draw);
+    // v1.2.5: 固定奖金额优先用官方当期实际值(draw.prize3..7,随奖池分档),缺省按规则版本默认表
     const amount = tier === '1' ? (draw.prize1 ?? 0)
       : tier === '2' ? (draw.prize2 ?? 0)
-      : tier ? (PRIZE_AMOUNTS[tier] ?? 0) : 0;
+      : tier === '3' ? (draw.prize3 ?? (isNewRule ? PRIZE_AMOUNTS['3'] : OLD_FIXED['3']) ?? 0)
+      : tier === '4' ? (draw.prize4 ?? (isNewRule ? PRIZE_AMOUNTS['4'] : OLD_FIXED['4']) ?? 0)
+      : tier === '5' ? (draw.prize5 ?? (isNewRule ? PRIZE_AMOUNTS['5'] : OLD_FIXED['5']) ?? 0)
+      : tier === '6' ? (draw.prize6 ?? (isNewRule ? PRIZE_AMOUNTS['6'] : OLD_FIXED['6']) ?? 0)
+      : tier === '7' ? (draw.prize7 ?? (isNewRule ? PRIZE_AMOUNTS['7'] : OLD_FIXED['7']) ?? 0)
+      : tier ? (isNewRule ? PRIZE_AMOUNTS[tier] ?? OLD_FIXED[tier] ?? 0 : OLD_FIXED[tier] ?? PRIZE_AMOUNTS[tier] ?? 0) : 0;
     return { pickIndex: i, numbers: nums, tier, amount };
   });
   return {

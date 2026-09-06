@@ -1,21 +1,19 @@
 import React from 'react';
 
-// 大乐透官方奖级(2019 新规 9 档) - v1.2.4 修正旧版 7 档错位
+// 大乐透奖级(2026 新规 7 档,第26014期起;旧规 26013 期止) - v1.2.5
 export const PRIZE_TIERS = [
   { tier: '1', name: '一等奖', condition: '5+2' },
   { tier: '2', name: '二等奖', condition: '5+1' },
-  { tier: '3', name: '三等奖', condition: '5+0' },
-  { tier: '4', name: '四等奖', condition: '4+2' },
-  { tier: '5', name: '五等奖', condition: '4+1' },
-  { tier: '6', name: '六等奖', condition: '3+2' },
-  { tier: '7', name: '七等奖', condition: '4+0' },
-  { tier: '8', name: '八等奖', condition: '3+1/2+2' },
-  { tier: '9', name: '九等奖', condition: '3+0/2+1/1+2/0+2' },
+  { tier: '3', name: '三等奖', condition: '5+0/4+2' },
+  { tier: '4', name: '四等奖', condition: '4+1' },
+  { tier: '5', name: '五等奖', condition: '4+0/3+2' },
+  { tier: '6', name: '六等奖', condition: '3+1/2+2' },
+  { tier: '7', name: '七等奖', condition: '3+0/2+1/1+2/0+2' },
 ];
 
-// v1.2.4 竞猜:固定奖金额表(1/2 等为浮动奖,取开奖数据 draw.prize1/prize2,无则 0)
+// v1.2.5 竞猜:固定奖默认金额表(新规低档兜底;实际金额以官方当期数据 draw.prize3..7 为准,随奖池≥8亿升档)
 export const PRIZE_AMOUNTS: Record<string, number> = {
-  '3': 10000, '4': 3000, '5': 300, '6': 200, '7': 100, '8': 15, '9': 5,
+  '3': 5000, '4': 300, '5': 150, '6': 15, '7': 5,
 };
 export const PICK_COST = 2;   // 竞猜一条成本 2 元
 

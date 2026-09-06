@@ -70,22 +70,29 @@ export interface TransitionResult {
   maxScore: number;            // 最高加权平均分
 }
 
-// 大乐透官方奖级(2019 新规 9 奖级): 1/2 浮动, 3:10000, 4:3000, 5:300, 6:200, 7:100, 8:15, 9:5
-// v1.2.4: 修正旧版 7 档错位(2+1 曾被误判为七等奖 100 元,实际九等奖 5 元)
+// ===== 大乐透奖级(2026-02-02 第26014期起新规) =====
+// v1.2.5: 官方2026新规 9奖级合并为7奖级(13个中奖条件不变):
+//   三等=5+0|4+2(原三/四等), 五等=4+0|3+2(原六/七等)
+//   固定奖金额随奖池分档: <8亿 → 5000/300/150/15/5; ≥8亿 → 6666/380/200/18/7
+//   26013期及以前为旧规(2019-2026.01): 9奖级 10000/3000/300/200/100/15/5
 export const checkPrize = (userFront: number[], userBack: number[], draw: LottoDraw): string | null => {
   const frontMatch = userFront.filter(n => draw.front.includes(n)).length;
   const backMatch = userBack.filter(n => draw.back.includes(n)).length;
 
+  // 是否新规期: 期号 ≥ 26014(或日期 ≥ 2026-02-02)
+  const drawNum = parseInt(draw.id);
+  const isNewRule = (drawNum >= 26014) || (draw.date >= '2026-02-02');
+
   if (frontMatch === 5 && backMatch === 2) return '1';
   if (frontMatch === 5 && backMatch === 1) return '2';
-  if (frontMatch === 5 && backMatch === 0) return '3';
-  if (frontMatch === 4 && backMatch === 2) return '4';
-  if (frontMatch === 4 && backMatch === 1) return '5';
-  if (frontMatch === 3 && backMatch === 2) return '6';
-  if (frontMatch === 4 && backMatch === 0) return '7';
-  if ((frontMatch === 3 && backMatch === 1) || (frontMatch === 2 && backMatch === 2)) return '8';
+  if (frontMatch === 5 && backMatch === 0) return '3';               // 两版均三等
+  if (frontMatch === 4 && backMatch === 2) return isNewRule ? '3' : '4';
+  if (frontMatch === 4 && backMatch === 1) return isNewRule ? '4' : '5';
+  if (frontMatch === 3 && backMatch === 2) return isNewRule ? '5' : '6';
+  if (frontMatch === 4 && backMatch === 0) return isNewRule ? '5' : '7';
+  if ((frontMatch === 3 && backMatch === 1) || (frontMatch === 2 && backMatch === 2)) return isNewRule ? '6' : '8';
   if ((frontMatch === 3 && backMatch === 0) || (frontMatch === 2 && backMatch === 1) ||
-      (frontMatch === 1 && backMatch === 2) || (frontMatch === 0 && backMatch === 2)) return '9';
+      (frontMatch === 1 && backMatch === 2) || (frontMatch === 0 && backMatch === 2)) return isNewRule ? '7' : '9';
 
   return null;
 };

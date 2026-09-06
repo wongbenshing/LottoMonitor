@@ -5,6 +5,8 @@ export interface LottoDraw {
   back: number[]; // 后区 2个数字
   prize1?: number;  // 一等奖单注奖金(元),0=未提供/无人中奖(v1.2 爬虫新增列)
   prize2?: number;  // 二等奖单注奖金(元),0=未提供/无人中奖
+  poolAfter?: number; // 开奖后奖池滚存(官方数据,v1.2.5)
+  prize3?: number; prize4?: number; prize5?: number; prize6?: number; prize7?: number; // 固定奖单注金额(官方当期实际值,v1.2.5;受奖池≥8亿分档影响)
 }
 
 export interface PrizeResult {

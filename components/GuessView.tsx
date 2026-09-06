@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import type { GuessRecord, GuessStats } from '../types';
+import type { GuessRecord, GuessStats, LottoDraw } from '../types';
 import { fetchGuessRecords, removePickFromGuess } from '../services/guessService';
 import { computeGuessStats } from '../services/guessCore';
+import { fetchServerCSV } from '../services/lottoService';
 import { PICK_COST } from '../constants';
 
 const TIER_NAMES: Record<string, string> = {
@@ -13,12 +14,15 @@ const fmtMoney = (n: number): string => n >= 10000 ? `¥${(n / 10000).toFixed(2)
 
 const GuessView: React.FC = () => {
   const [records, setRecords] = useState<GuessRecord[]>([]);
+  const [draws, setDraws] = useState<LottoDraw[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
-    setRecords(await fetchGuessRecords());
+    const [recs, history] = await Promise.all([fetchGuessRecords(), fetchServerCSV().catch(() => [] as LottoDraw[])]);
+    setRecords(recs);
+    setDraws(history);
     setLoading(false);
   };
 
@@ -176,15 +180,19 @@ const GuessView: React.FC = () => {
                         const r = rec.results?.[i];
                         const front = nums.slice(0, 5);
                         const back = nums.slice(5, 7);
+                        // v1.2.4: 只给命中开奖号码的球上色(前区绿/后区紫),未命中保持灰
+                        const draw = draws.find(d => d.date === rec.targetDate);
+                        const hitFront = (n: number) => !!draw?.front.includes(n);
+                        const hitBack = (n: number) => !!draw?.back.includes(n);
                         return (
                           <div key={i} className="flex flex-wrap items-center gap-1.5 text-xs">
                             <span className="text-[10px] font-bold text-slate-400 w-10">第{i + 1}组</span>
                             <span className="flex gap-1">{front.map((n, j) => (
-                              <span key={j} className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${r?.tier ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{n}</span>
+                              <span key={j} className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${hitFront(n) ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{n}</span>
                             ))}</span>
                             <span className="text-slate-300 mx-0.5">|</span>
                             <span className="flex gap-1">{back.map((n, j) => (
-                              <span key={j} className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${r?.tier ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{n}</span>
+                              <span key={j} className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${hitBack(n) ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}>{n}</span>
                             ))}</span>
                             <span className={`ml-2 font-bold ${r?.tier ? 'text-emerald-600' : 'text-slate-400'}`}>
                               {r?.tier ? `${TIER_NAMES[r.tier]} ${fmtMoney(r.amount)}` : '未中'}

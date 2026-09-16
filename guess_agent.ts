@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { GuessRecord, GuessParams, LottoDraw } from './types';
-import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate } from './services/guessCore';
+import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate, isDrawDay, resolveDailyTarget } from './services/guessCore';
 import { parseCSV } from './services/lottoService';
 
 // node 运行时 process.env.API_KEY 需手动从 .env.local 加载(与 vite define 行为一致: ← GEMINI_API_KEY)
@@ -52,12 +52,19 @@ function loadHistory(): LottoDraw[] {
   catch { return []; }
 }
 
-/** 每日 10:00:下期序列为空 → AI 选号(count=2)写入 */
+/** 每日 10:00:按 resolveDailyTarget 决定是否生成、生成哪一期("今天不是开奖日"才生成) */
 async function dailyPick(now: Date): Promise<void> {
   const today = fmtDate(now);
   if (lastDailyRunDate === today) return;
-  const targetDate = nextOpenDate(now);
-  if (loadRecords().some(r => r.targetDate === targetDate)) return; // 已有下期序列
+  const records = loadRecords();
+  const targetDate = resolveDailyTarget(now, records.map(r => r.targetDate));
+  if (!targetDate) {
+    lastDailyRunDate = today; // 今天不生成:先记账,避免 30s 轮询重复判定
+    if (isDrawDay(now) && !records.some(r => r.targetDate === today)) {
+      console.warn(`[guess] ${today} 是开奖日且今晚这期没有自动号(按规则不补生成,等非开奖日为下一期选号)`);
+    }
+    return;
+  }
   lastDailyRunDate = today; // 先记账防并发重入
 
   const history = loadHistory();

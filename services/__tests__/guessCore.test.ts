@@ -8,6 +8,8 @@ import {
   addPick,
   removePick,
   currentOpenDate,
+  isDrawDay,
+  resolveDailyTarget,
   DRAW_CUTOFF_MINUTES,
 } from '../guessCore';
 import type { GuessRecord, LottoDraw } from '../../types';
@@ -44,6 +46,41 @@ describe('currentOpenDate(开奖日当天手动加入的目标期)', () => {
   });
   it('常量 21:25', () => {
     expect(DRAW_CUTOFF_MINUTES).toBe(21 * 60 + 25);
+  });
+});
+
+describe('isDrawDay / resolveDailyTarget(每日 10:00 生成规则:只有非开奖日才生成下一期)', () => {
+  it('开奖日 = 周一(9/14)/周三(9/16)/周六(9/12);周二、周四、周五、周日不是', () => {
+    for (const d of ['2026-09-14', '2026-09-16', '2026-09-12']) {
+      expect(isDrawDay(new Date(`${d}T10:00:00`))).toBe(true);
+    }
+    for (const d of ['2026-09-13', '2026-09-15', '2026-09-17', '2026-09-18']) {
+      expect(isDrawDay(new Date(`${d}T10:00:00`))).toBe(false);
+    }
+  });
+
+  it('非开奖日 → 生成下一开奖日(周日→周一 / 周二→周三 / 周四→周六)', () => {
+    expect(resolveDailyTarget(new Date('2026-09-13T10:00:00'), [])).toBe('2026-09-14');
+    expect(resolveDailyTarget(new Date('2026-09-15T10:00:00'), [])).toBe('2026-09-16');
+    expect(resolveDailyTarget(new Date('2026-09-17T10:00:00'), [])).toBe('2026-09-19');
+  });
+
+  it('开奖日 → 不生成(当天 10:00 生成的"下一期"必然漏掉当晚那一期)', () => {
+    expect(resolveDailyTarget(new Date('2026-09-14T10:00:00'), [])).toBeNull();
+    expect(resolveDailyTarget(new Date('2026-09-16T10:00:00'), [])).toBeNull();
+    expect(resolveDailyTarget(new Date('2026-09-12T10:00:00'), [])).toBeNull();
+  });
+
+  it('下期已有序列 → 不生成(周五跳过只因周四已生成;周四漏跑时周五兜底)', () => {
+    expect(resolveDailyTarget(new Date('2026-09-18T10:00:00'), ['2026-09-19'])).toBeNull();
+    expect(resolveDailyTarget(new Date('2026-09-18T10:00:00'), [])).toBe('2026-09-19');
+  });
+
+  it('回归:输入必须覆盖目标期前最近一次开奖 —— 目标 9/16 只能在 9/15 生成(不能在 9/14 开奖日早上)', () => {
+    expect(resolveDailyTarget(new Date('2026-09-12T10:00:00'), ['2026-09-12'])).toBeNull(); // 周六,漏 9/12 那期
+    expect(resolveDailyTarget(new Date('2026-09-13T10:00:00'), ['2026-09-12'])).toBe('2026-09-14');
+    expect(resolveDailyTarget(new Date('2026-09-14T10:00:00'), ['2026-09-14'])).toBeNull(); // 周一,漏 9/14 那期
+    expect(resolveDailyTarget(new Date('2026-09-15T10:00:00'), ['2026-09-14'])).toBe('2026-09-16');
   });
 });
 

@@ -34,6 +34,29 @@ export function currentOpenDate(from: Date = new Date()): string {
   return nextOpenDate(from);
 }
 
+/** 开奖日:周一(1)/周三(3)/周六(6) —— 非开奖日为 周二/周四/周五/周日 */
+export function isDrawDay(d: Date): boolean {
+  const day = d.getDay();
+  return day === 1 || day === 3 || day === 6;
+}
+
+/**
+ * 每日 10:00 自动选号该生成哪一期(纯函数)。返回 null = 本次不生成。
+ *
+ * 铁律:生成时的输入历史必须覆盖「目标期之前最近一次开奖」。
+ * 开奖日(周一/三/六)当天 10:00,当晚那期还没开(21:25),此刻生成的"下一期"必然
+ * 漏掉当晚这一期 → 因此规则是:**只有"今天不是开奖日"时才生成下一期**。
+ * 非开奖日生成 → 目标期 = nextOpenDate,输入正好是紧邻的上一期,零漏期。
+ *
+ * @param existingTargets 已有记录的 targetDate 列表(已存在下期序列则跳过)
+ */
+export function resolveDailyTarget(now: Date, existingTargets: string[]): string | null {
+  if (isDrawDay(now)) return null;                 // 开奖日:当晚那期未开,不生成下一期
+  const next = nextOpenDate(now);
+  if (existingTargets.includes(next)) return null;  // 下期已有序列(周四已生成 → 周五跳过)
+  return next;
+}
+
 /** 期号推算:最新期号 +1,后三位 >156 进位到次年(大乐透每年约 156 期) */
 export function nextPeriodId(latestId: string): string {
   const m = latestId.match(/^(\d{2})(\d{3})$/);

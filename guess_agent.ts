@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { GuessRecord, GuessParams, LottoDraw } from './types';
-import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate, isDrawDay, resolveDailyTarget } from './services/guessCore';
+import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate, isDrawDay, resolveDailyTarget, isMarketClosed } from './services/guessCore';
 import { parseCSV } from './services/lottoService';
 
 // node 运行时 process.env.API_KEY 需手动从 .env.local 加载(与 vite define 行为一致: ← GEMINI_API_KEY)
@@ -90,14 +90,28 @@ async function dailyPick(now: Date): Promise<void> {
   console.log(`[guess] ${today} 10:00 竞猜已生成:${targetDate}(${rec.periodId}) ${picks.length}组: ${JSON.stringify(picks)}`);
 }
 
-/** 每 5 分钟:新开奖验证(history.csv 中 targetDate 已开奖的 pending → verified) */
+/** 每 5 分钟:新开奖验证(history.csv 中 targetDate 已开奖的 pending → verified);休市目标期 → failed */
 function verifyPending(history: LottoDraw[]): void {
   const records = loadRecords();
   let changed = false;
+  const today = fmtDate(new Date());
   const updated = records.map(r => {
     if (r.status !== 'pending') return r;
     const draw = history.find(d => d.date === r.targetDate);
-    if (!draw) return r;
+    if (!draw) {
+      // 休市日不开奖:该目标期永远不会有开奖数据 → 直接作废,否则「目标开奖日」会被这条永久 pending 挡住
+      if (isMarketClosed(r.targetDate)) {
+        changed = true;
+        console.log(`[guess] 作废 ${r.targetDate}: 该日彩票休市无开奖(2026 国庆休市 10-01~10-04),标记 failed`);
+        return { ...r, status: 'failed' as const };
+      }
+      // 非休市却迟迟等不到开奖数据:只告警(可能是爬虫漏抓,别自作主张作废)
+      if (r.targetDate < today) {
+        const lagDays = Math.round((Date.parse(today) - Date.parse(r.targetDate)) / 86400000);
+        if (lagDays >= 3) console.warn(`[guess] ${r.targetDate} 已过 ${lagDays} 天仍无开奖数据,保持 pending(检查 history.csv/爬虫)`);
+      }
+      return r;
+    }
     changed = true;
     const v = verifyRecord(r, draw);
     console.log(`[guess] 验证 ${r.targetDate}: 开奖${draw.id}, 中奖${v.results?.filter(x => x.tier).length ?? 0}/${v.picks.length}组, 奖金¥${v.totalPrize ?? 0}`);

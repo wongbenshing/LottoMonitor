@@ -10,6 +10,7 @@ import {
   currentOpenDate,
   isDrawDay,
   resolveDailyTarget,
+  isMarketClosed,
   DRAW_CUTOFF_MINUTES,
 } from '../guessCore';
 import type { GuessRecord, LottoDraw } from '../../types';
@@ -257,5 +258,50 @@ describe('removePick', () => {
     const base = mkRec('2026-08-29', [[1, 2, 3, 4, 5, 6, 7]]);
     expect(removePick([base], '2026-08-29', 5).removed).toBe(false);
     expect(removePick([base], '2026-09-01', 0).removed).toBe(false);
+  });
+});
+
+describe('休市日(2026 国庆 10-01~10-04 大乐透不开奖)', () => {
+  it('isMarketClosed 识别休市区间;10-05(周一)恢复开奖', () => {
+    expect(isMarketClosed('2026-10-01')).toBe(true);
+    expect(isMarketClosed('2026-10-03')).toBe(true);  // 周六却是休市日 → 2026-10-03 那期不存在
+    expect(isMarketClosed('2026-10-04')).toBe(true);
+    expect(isMarketClosed('2026-10-05')).toBe(false);
+    expect(isMarketClosed('2026-10-07')).toBe(false);
+  });
+
+  it('isDrawDay:休市日即使是周六也不算开奖日', () => {
+    expect(isDrawDay(new Date('2026-10-03T10:00:00'))).toBe(false); // 周六 + 休市
+    expect(isDrawDay(new Date('2026-10-05T10:00:00'))).toBe(true);  // 周一,恢复开奖
+    expect(isDrawDay(new Date('2026-10-01T10:00:00'))).toBe(false); // 周四本就非开奖日
+  });
+
+  it('nextOpenDate 跳过休市日:10-02 → 10-05(而不是 10-03)', () => {
+    expect(nextOpenDate(new Date('2026-10-02T10:00:00'))).toBe('2026-10-05');
+    expect(nextOpenDate(new Date('2026-10-01T10:00:00'))).toBe('2026-10-05');
+    expect(nextOpenDate(new Date('2026-10-04T10:00:00'))).toBe('2026-10-05');
+  });
+
+  it('currentOpenDate:休市当天不返回今天(10-03 16:00 → 10-05)', () => {
+    expect(currentOpenDate(new Date('2026-10-03T16:00:00'))).toBe('2026-10-05');
+  });
+
+  it('resolveDailyTarget:休市日(10-02 周五)生成 10-05 那期 —— 不会再生成不存在的 10-03', () => {
+    expect(resolveDailyTarget(new Date('2026-10-02T10:00:00'), [])).toBe('2026-10-05');
+    expect(resolveDailyTarget(new Date('2026-10-02T10:00:00'), ['2026-10-05'])).toBeNull(); // 已有则跳过
+  });
+
+  it('休市记录只能被作废(status=failed),绝不能被当成已开奖(它永远等不到 history 数据)', () => {
+    // 该期在 history.csv 中不存在 → verifyPending 走 isMarketClosed 分支标记 failed;
+    // 作废记录不计入 computeGuessStats(只统计 verified)
+    const closed = { ...mkRec('2026-10-03', [[7, 17, 21, 30, 32, 6, 12]]), status: 'failed' as const };
+    const stats = computeGuessStats([closed]);
+    expect(stats.totalPicks).toBe(0);
+    expect(stats.totalCost).toBe(0);
+    // failed 期不阻挡「最早 pending」选取(前端目标开奖日据此选取)
+    const pending = mkRec('2026-10-17', [[1, 2, 3, 4, 5, 6, 7]]);
+    const nextRec = [closed, pending].filter(r => r.status === 'pending')
+      .sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
+    expect(nextRec.targetDate).toBe('2026-10-17');
   });
 });

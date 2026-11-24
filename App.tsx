@@ -25,6 +25,28 @@ const App: React.FC = () => {
   // AI选号结果状态（提升到父组件，切换页面不丢失）
   const [aiAnalysis, setAiAnalysis] = useState<AnalysisSummary | null>(null);
 
+  // v1.3.1 持久化历史数据到 localStorage:配额超限时逐级降级,绝不让缓存异常影响渲染
+  // ⚠ 必须放在 effect 里:以前写在 setState updater 内,QuotaExceededError 会在渲染阶段抛出 → 整树卸载 → 白屏
+  const persistHistory = useCallback((data: LottoDraw[]) => {
+    if (data.length === 0) return;
+    try {
+      localStorage.setItem('dlt_history', JSON.stringify(data));
+    } catch {
+      try {
+        // 降级 1:只缓存最近 500 期(页面展示只用最新 100 条,云端每次都会重新拉全量)
+        localStorage.setItem('dlt_history', JSON.stringify(data.slice(0, 500)));
+        console.warn('[lotto] localStorage 配额不足,已降级为只缓存最近 500 期');
+      } catch {
+        try {
+          localStorage.removeItem('dlt_history');
+        } catch {
+          /* localStorage 完全不可用时忽略 */
+        }
+        console.warn('[lotto] localStorage 不可用,已关闭历史数据本地缓存(不影响页面使用)');
+      }
+    }
+  }, []);
+
   // 更新并持久化数据
   const updateHistory = useCallback((newData: LottoDraw[]) => {
     setHistory(prev => {
@@ -36,11 +58,14 @@ const App: React.FC = () => {
         return acc;
       }, []);
       // 按期号倒序排
-      const sorted = merged.sort((a, b) => parseInt(b.id) - parseInt(a.id));
-      localStorage.setItem('dlt_history', JSON.stringify(sorted));
-      return sorted;
+      return merged.sort((a, b) => parseInt(b.id) - parseInt(a.id));
     });
   }, []);
+
+  // 历史数据变化后再落盘(副作用移出 setState updater)
+  useEffect(() => {
+    persistHistory(history);
+  }, [history, persistHistory]);
 
   // 从后端获取最新的 CSV
   const triggerSync = async () => {
@@ -88,7 +113,17 @@ const App: React.FC = () => {
       try {
         // 1. 尝试从本地持久化加载
         const saved = localStorage.getItem('dlt_history');
-        const cachedData = saved ? JSON.parse(saved) : [];
+        // v1.3.1 缓存可能是降级子集或写坏的脏数据:解析后校验结构,异常一律当空缓存
+        let cachedData: LottoDraw[] = [];
+        try {
+          const parsed = saved ? JSON.parse(saved) : [];
+          cachedData = Array.isArray(parsed)
+            ? parsed.filter((d: LottoDraw) => d && d.id && Array.isArray(d.front) && Array.isArray(d.back))
+            : [];
+        } catch (e) {
+          console.warn('[lotto] 本地缓存解析失败,已忽略:', e);
+          cachedData = [];
+        }
 
         if (cachedData.length > 0) {
           setHistory(cachedData);

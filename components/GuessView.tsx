@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import type { GuessRecord, GuessStats, LottoDraw } from '../types';
 import { fetchGuessRecords, removePickFromGuess } from '../services/guessService';
-import { computeGuessStats } from '../services/guessCore';
+import {
+  computeGuessStats, latestDraw, isUpgradeWindow, upgradeGap, expectedReturnRate, periodCost,
+} from '../services/guessCore';
 import { fetchServerCSV } from '../services/lottoService';
-import { PICK_COST } from '../constants';
+import { PICK_COST, UPGRADE_POOL_THRESHOLD, EXPECTED_RETURN_RATE, SMALL_TIER_THEORY_RETURN_RATE } from '../constants';
 
 const TIER_NAMES: Record<string, string> = {
   '1': '一等奖', '2': '二等奖', '3': '三等奖', '4': '四等奖',
@@ -11,6 +13,14 @@ const TIER_NAMES: Record<string, string> = {
 };
 
 const fmtMoney = (n: number): string => n >= 10000 ? `¥${(n / 10000).toFixed(2)}万` : `¥${n.toLocaleString()}`;
+
+/** 金额(元) → 亿/万 中文读数 */
+const fmtPool = (n?: number): string => {
+  if (!n) return '未知';
+  return n >= 1e8 ? `${(n / 1e8).toFixed(3)} 亿` : `${(n / 1e4).toFixed(0)} 万`;
+};
+
+const pct = (v: number, digits = 1): string => `${(v * 100).toFixed(digits)}%`;
 
 const GuessView: React.FC = () => {
   const [records, setRecords] = useState<GuessRecord[]>([]);
@@ -44,8 +54,57 @@ const GuessView: React.FC = () => {
   const verified = records.filter(r => r.status === 'verified').sort((a, b) => b.targetDate.localeCompare(a.targetDate));
   const roiColor = stats.roi >= 0 ? 'text-emerald-600' : 'text-red-600';
 
+  // v1.4 奖池闸门:上期奖池 ≥8 亿 → 本期三至七等奖升档
+  const lastDraw = latestDraw(draws);
+  const inUpgradeWindow = isUpgradeWindow(draws);
+  const gapToUpgrade = upgradeGap(draws);
+  const currentEvRate = expectedReturnRate(lastDraw);
+  // 卡片主口径用「分档实测均值」(新规 121 期),单期值波动大(p1/p2 浮动),放小字避免口径矛盾
+  const windowEvRate = inUpgradeWindow ? EXPECTED_RETURN_RATE.upgrade : EXPECTED_RETURN_RATE.nonUpgrade;
+  const suggestedPicks = inUpgradeWindow ? 2 : 1;
+
   return (
     <div className="space-y-6">
+      {/* v1.4 奖池闸门卡(唯一能提升每元期望返还的机制) */}
+      <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-3">
+        <h3 className="font-bold text-slate-800 flex items-center gap-2">
+          <span className="w-1.5 h-5 bg-amber-500 rounded-full"></span>
+          奖池闸门
+          <span className="text-xs font-normal text-slate-400">升档窗口决定每元期望返还</span>
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-slate-50 rounded-2xl p-4 text-center">
+            <div className="text-xl font-black text-slate-800">{fmtPool(lastDraw?.poolAfter)}</div>
+            <div className="text-[10px] text-slate-400 font-bold">上期开奖后奖池</div>
+          </div>
+          <div className={`rounded-2xl p-4 text-center ${inUpgradeWindow ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+            <div className={`text-xl font-black ${inUpgradeWindow ? 'text-emerald-600' : 'text-slate-500'}`}>
+              {inUpgradeWindow ? '升档窗口' : '非升档窗口'}
+            </div>
+            <div className="text-[10px] text-slate-400 font-bold">
+              {inUpgradeWindow ? '三至七等奖升档(5→7 元等)' : `距 8 亿差 ${fmtPool(gapToUpgrade)}`}
+            </div>
+          </div>
+          <div className="bg-slate-50 rounded-2xl p-4 text-center">
+            <div className="text-xl font-black text-blue-600">{pct(windowEvRate)}</div>
+            <div className="text-[10px] text-slate-400 font-bold">该窗口每元期望返还</div>
+            <div className="text-[9px] text-slate-400 mt-0.5">121 期分档均值 · 当期单期口径 {pct(currentEvRate)}</div>
+          </div>
+          <div className="bg-slate-50 rounded-2xl p-4 text-center">
+            <div className="text-xl font-black text-slate-800">{suggestedPicks} 注</div>
+            <div className="text-[10px] text-slate-400 font-bold">建议注数(软建议)</div>
+          </div>
+        </div>
+        <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 rounded-2xl px-4 py-3">
+          规则:奖池 ≥8 亿 → <b>下期</b>三至七等奖单注奖金升档(5000→6666、150→200、
+          <b>5→7</b> 元)。历史实测:升档期每元期望返还 {pct(EXPECTED_RETURN_RATE.upgrade)}、非升档期{' '}
+          {pct(EXPECTED_RETURN_RATE.nonUpgrade)},窗口约占 {pct(40 / 121, 0)} 的期数。
+          <br />
+          <b>注数只是建议,不拦单</b>:非升档期默认降到 1 注以压低绝对亏损,想追加随时可在「下期竞猜」里手动加入。
+          追加投注(每注 +1 元)只参与一/二等奖 80% 加奖,边际返还低于新买一注基本投注 —— 不建议追加。
+        </p>
+      </div>
+
       {/* 下期竞猜状态卡 */}
       <div className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-4">
         <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -88,8 +147,21 @@ const GuessView: React.FC = () => {
                 );
               })}
             </div>
+            {nextRec.pickFeatures && nextRec.pickFeatures.length > 0 && (
+              <div className="flex flex-wrap gap-2 text-[10px] text-slate-500">
+                {nextRec.pickFeatures.map((f, i) => (
+                  <span key={i} className="bg-slate-50 rounded-lg px-2 py-1">
+                    第{i + 1}组 和值{f.sum} · 极差{f.range} · 奇{f.oddCount} · 拥挤度
+                    <b className={f.crowdingScore >= 50 ? 'text-orange-600' : 'text-emerald-600'}>{f.crowdingScore}</b>
+                  </span>
+                ))}
+              </div>
+            )}
             <p className="text-[10px] text-slate-400">
-              生成于 {new Date(nextRec.createdAt).toLocaleString('zh-CN', { hour12: false })} · 参数: 和值 {nextRec.params.sumMin}-{nextRec.params.sumMax} · 极差 {nextRec.params.rangeMin}-{nextRec.params.rangeMax} · 智能体每日10:00自动生成
+              生成于 {new Date(nextRec.createdAt).toLocaleString('zh-CN', { hour12: false })} ·
+              建议参数(仅作参考,不强制): 和值 {nextRec.params.sumMin}-{nextRec.params.sumMax} · 极差 {nextRec.params.rangeMin}-{nextRec.params.rangeMax} ·
+              {nextRec.gate ? ` 闸门:${nextRec.gate.upgradeWindow ? '升档窗口' : '非升档窗口'} · 建议 ${nextRec.gate.suggestedPicks} 注 ·` : ''}
+              智能体每日 10:00 自动生成
             </p>
           </>
         ) : (
@@ -117,23 +189,57 @@ const GuessView: React.FC = () => {
               <div className="bg-slate-50 rounded-2xl p-4 text-center">
                 <div className="text-2xl font-black text-slate-800">{(stats.pickSuccessRate * 100).toFixed(1)}%</div>
                 <div className="text-[10px] text-slate-400 font-bold">条目成功率 ({stats.winningPicks}/{stats.totalPicks})</div>
+                <div className="text-[9px] text-slate-400 mt-0.5">含 5~18 元小奖,非实质中奖</div>
               </div>
               <div className="bg-slate-50 rounded-2xl p-4 text-center">
-                <div className="text-2xl font-black text-slate-800">{stats.winDays}天</div>
-                <div className="text-[10px] text-slate-400 font-bold">获胜天数</div>
+                <div className="text-2xl font-black text-slate-800">{stats.netWinPeriods}期</div>
+                <div className="text-[10px] text-slate-400 font-bold">净回本期数</div>
+                <div className="text-[9px] text-slate-400 mt-0.5">该期回收 &gt; 该期投入</div>
               </div>
               <div className={`rounded-2xl p-4 text-center ${stats.roi >= 0 ? 'bg-emerald-50' : 'bg-red-50'}`}>
                 <div className={`text-2xl font-black ${roiColor}`}>{stats.roi >= 0 ? '+' : ''}{(stats.roi * 100).toFixed(1)}%</div>
                 <div className="text-[10px] text-slate-400 font-bold">综合 ROI</div>
+                <div className="text-[9px] text-slate-400 mt-0.5">期望上限约 -44%(制度抽水)</div>
               </div>
             </div>
+
+            {/* v1.3 分层口径:小奖返还率可对照理论值判断系统是否在数学上正常运作 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-blue-50 rounded-2xl p-4 text-center">
+                <div className="text-xl font-black text-blue-700">{pct(stats.smallTierReturnRate)}</div>
+                <div className="text-[10px] text-slate-500 font-bold">小奖返还率(六/七等)</div>
+                <div className="text-[9px] text-slate-400 mt-0.5">理论 {pct(SMALL_TIER_THEORY_RETURN_RATE)} · 与理论吻合即数学正常</div>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-4 text-center">
+                <div className="text-xl font-black text-slate-800">{pct(stats.longTailReturnRate)}</div>
+                <div className="text-[10px] text-slate-400 font-bold">长尾返还率(一~五等)</div>
+                <div className="text-[9px] text-slate-400 mt-0.5">小样本几乎为 0,100 注内看不见</div>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-4 text-center">
+                <div className={`text-xl font-black ${stats.upgradeNet >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {fmtMoney(stats.upgradeNet)}
+                </div>
+                <div className="text-[10px] text-slate-400 font-bold">升档窗口净盈亏({stats.upgradePeriods}期)</div>
+              </div>
+              <div className="bg-slate-50 rounded-2xl p-4 text-center">
+                <div className={`text-xl font-black ${stats.nonUpgradeNet >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {fmtMoney(stats.nonUpgradeNet)}
+                </div>
+                <div className="text-[10px] text-slate-400 font-bold">非升档期净盈亏({stats.nonUpgradePeriods}期)</div>
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-4 text-xs text-slate-500 bg-slate-50 rounded-2xl px-4 py-3">
               <span>总投入: <b className="text-slate-700">{fmtMoney(stats.totalCost)}</b> ({stats.totalPicks}条 × {PICK_COST}元)</span>
               <span>总奖金: <b className="text-emerald-600">{fmtMoney(stats.totalPrize)}</b></span>
               <span className="text-slate-300">·</span>
               <span>盈亏: <b className={stats.totalPrize - stats.totalCost >= 0 ? 'text-emerald-600' : 'text-red-600'}>{fmtMoney(stats.totalPrize - stats.totalCost)}</b></span>
             </div>
-            <p className="text-[10px] text-slate-400">注: 一二等奖为浮动奖金,取 500.com 开奖实际单注奖金;历史数据无奖金字段时按 0 计</p>
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              口径: 一/二等奖取官方当期单注奖金(浮动),三至七等奖取官方当期值(含奖池 ≥8 亿升档);
+              官方字段缺失的记录会标 dataIncomplete 并在后台告警,不再静默按默认档结算。
+              制度返还率约 51%~56%,长期期望为负 —— ROI 不可能转正,可优化的是「每元期望返还」(选升档窗口)与「绝对亏损」(控注数)。
+            </p>
           </>
         ) : (
           <div className="text-center py-6 text-slate-400 text-sm">尚无已验证的竞猜记录</div>
@@ -163,6 +269,12 @@ const GuessView: React.FC = () => {
                   >
                     <span className="text-sm font-bold text-slate-700">{rec.targetDate}</span>
                     <span className="text-xs text-slate-400">{rec.drawId ?? rec.periodId}</span>
+                    {(rec.gate?.upgradeWindow ?? rec.drawSnapshot?.isUpgradeWindow) && (
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-50 rounded-full px-1.5 py-0.5">升档</span>
+                    )}
+                    {rec.dataIncomplete && (
+                      <span title="官方奖金字段缺失,金额可能不完整" className="text-[10px] font-bold text-orange-600 bg-orange-50 rounded-full px-1.5 py-0.5">数据缺</span>
+                    )}
                     {win.length > 0 ? (
                       <span className="text-xs font-bold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5">
                         ✓ 中奖 {win.map(w => `${TIER_NAMES[w.tier!]}${fmtMoney(w.amount)}`).join(' + ')}
@@ -173,7 +285,7 @@ const GuessView: React.FC = () => {
                     <span className="ml-auto text-sm font-black whitespace-nowrap">
                       {prize > 0 && <span className="text-emerald-600">+{fmtMoney(prize)}</span>}
                       <span className={prize > 0 ? 'text-slate-500 ml-1.5' : 'text-slate-400'}>
-                        −{fmtMoney(rec.picks.length * PICK_COST)}
+                        −{fmtMoney(periodCost(rec))}
                       </span>
                     </span>
                   </button>

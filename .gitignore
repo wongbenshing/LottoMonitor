@@ -30,3 +30,6 @@ __pycache__/
 history.csv
 guess_records.json
 tsconfig.tsbuildinfo
+
+# local backups
+*.bak-20*

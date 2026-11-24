@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync, existsSync } from 'node:fs';
 import { checkPrize } from '../../utils';
 import {
   nextOpenDate,
@@ -11,8 +12,20 @@ import {
   isDrawDay,
   resolveDailyTarget,
   isMarketClosed,
+  isUpgradeWindow,
+  upgradeGap,
+  buildGate,
+  buildCost,
+  latestDraw,
+  computePickFeatures,
+  isParamsCompliant,
+  expectedPrizePerPick,
+  expectedReturnRate,
+  periodCost,
   DRAW_CUTOFF_MINUTES,
 } from '../guessCore';
+import { parseCSV } from '../lottoService';
+import { UPGRADE_POOL_THRESHOLD } from '../../constants';
 import type { GuessRecord, LottoDraw } from '../../types';
 
 const EMPTY_PARAMS = {
@@ -303,5 +316,220 @@ describe('休市日(2026 国庆 10-01~10-04 大乐透不开奖)', () => {
     const nextRec = [closed, pending].filter(r => r.status === 'pending')
       .sort((a, b) => a.targetDate.localeCompare(b.targetDate))[0];
     expect(nextRec.targetDate).toBe('2026-10-17');
+  });
+});
+
+// ============ v1.3 奖池升档闸门 ============
+
+const mkDraw = (date: string, poolAfter?: number, extra: Partial<LottoDraw> = {}): LottoDraw => ({
+  id: '26134', date, front: [4, 15, 17, 24, 31], back: [6, 9], poolAfter, ...extra,
+});
+
+describe('v1.3 奖池升档闸门(上期奖池 ≥8 亿 → 本期三至七等奖升档)', () => {
+  it('真实数据:26106 期 8.27 亿 → 窗口;26134 期 7.583 亿 → 非窗口', () => {
+    expect(isUpgradeWindow([mkDraw('2026-09-16', 827_000_000)])).toBe(true);
+    expect(isUpgradeWindow([mkDraw('2026-11-23', 758_257_386)])).toBe(false);
+    // 无奖池数据 → 保守判为非窗口
+    expect(isUpgradeWindow([mkDraw('2026-11-23')])).toBe(false);
+    expect(isUpgradeWindow([])).toBe(false);
+  });
+
+  it('latestDraw 不依赖数组顺序(倒序/正序都取最新)', () => {
+    const desc = [mkDraw('2026-11-23', 7.58e8), mkDraw('2026-11-21', 7.67e8)];
+    const asc = [...desc].reverse();
+    expect(latestDraw(desc)!.date).toBe('2026-11-23');
+    expect(latestDraw(asc)!.date).toBe('2026-11-23');
+  });
+
+  it('upgradeGap:7.583 亿 → 差 4174 万;已升档 → 0', () => {
+    expect(upgradeGap([mkDraw('2026-11-23', 758_257_386)])).toBe(41_742_614);
+    expect(upgradeGap([mkDraw('2026-09-16', 827_000_000)])).toBe(0);
+    expect(upgradeGap([mkDraw('2026-11-23')])).toBeUndefined();
+  });
+
+  it('buildGate:窗口期建议 2 组,非窗口期建议 1 组(软建议,skipped=false 不硬拦)', () => {
+    const inWindow = buildGate([mkDraw('2026-09-16', 827_000_000)]);
+    expect(inWindow.upgradeWindow).toBe(true);
+    expect(inWindow.suggestedPicks).toBe(2);
+    expect(inWindow.skipped).toBe(false);
+
+    const off = buildGate([mkDraw('2026-11-23', 758_257_386)], { offWindowPicks: 1 });
+    expect(off.upgradeWindow).toBe(false);
+    expect(off.suggestedPicks).toBe(1);
+    expect(off.poolAfter).toBe(758_257_386);
+    expect(off.gapToUpgrade).toBe(41_742_614);
+  });
+
+  it('历史回放(history.csv 新规期):用上期奖池 ≥8 亿 预测本期升档,命中率 ≥98%', () => {
+    if (!existsSync('history.csv')) return; // 无数据文件时跳过(CI/部署环境)
+    const draws = parseCSV(readFileSync('history.csv', 'utf8'))
+      .filter(d => parseInt(d.id) >= 26014 || d.date >= '2026-02-02')
+      .sort((a, b) => a.date.localeCompare(b.date));
+    expect(draws.length).toBeGreaterThan(100);
+    let ok = 0, total = 0;
+    for (let i = 1; i < draws.length; i++) {
+      const prev = draws[i - 1], cur = draws[i];
+      if (!prev.poolAfter || !cur.prize7) continue; // 缺数据期不参与统计
+      const upgradeNow = cur.prize7 >= 7; // 升档期七等奖 7 元
+      const predicted = prev.poolAfter >= UPGRADE_POOL_THRESHOLD;
+      total++;
+      if (predicted === upgradeNow) ok++;
+    }
+    expect(total).toBeGreaterThan(100);
+    expect(ok / total).toBeGreaterThan(0.98);
+  });
+});
+
+// ============ v1.3 号码特征 / 拥挤度 / 建议参数合规 ============
+
+describe('v1.3 号码特征与拥挤度', () => {
+  it('computePickFeatures:和值/极差/奇偶/连号/同尾/生日号/大号', () => {
+    const f = computePickFeatures([7, 10, 14, 19, 35, 2, 10]);
+    expect(f.sum).toBe(85);
+    expect(f.range).toBe(28);
+    expect(f.oddCount).toBe(3);
+    expect(f.consecutivePairs).toBe(0);
+    expect(f.birthdayCount).toBe(4);   // 7,10,14,19 ≤31
+    expect(f.bigCount).toBe(1);        // 35
+    expect(f.tailRepeat).toBe(0);
+
+    const g = computePickFeatures([12, 22, 23, 32, 33, 5, 7]);
+    expect(g.consecutivePairs).toBe(2); // 22-23, 32-33
+    expect(g.tailRepeat).toBe(4);       // 尾数2:12/22/32 三对 + 尾数3:23/33 一对 = 4
+    expect(g.bigCount).toBe(2);
+  });
+
+  it('拥挤度:生日号密集 + 连号 + 中位和值 明显高于 冷门形态', () => {
+    const crowded = computePickFeatures([1, 2, 3, 20, 25, 3, 7]);   // 全生日号 + 两对连号 + 和值 51
+    const cold = computePickFeatures([8, 16, 24, 32, 35, 4, 11]);   // 含大号、无连号、和值 115
+    expect(crowded.crowdingScore).toBeGreaterThan(cold.crowdingScore);
+    expect(cold.crowdingScore).toBeLessThanOrEqual(100);
+  });
+
+  it('isParamsCompliant:和值/极差越界 → false;全空参数 → true(手动加入的组不受限)', () => {
+    const params = { ...EMPTY_PARAMS, sumMin: 83, sumMax: 90, rangeMin: 26, rangeMax: 28, odd: [3], consecutive: [0] };
+    expect(isParamsCompliant([7, 10, 14, 19, 35, 2, 10], params)).toBe(true);  // 和值85 极差28 奇3 无连号
+    expect(isParamsCompliant([1, 2, 3, 20, 25, 3, 7], params)).toBe(false);    // 和值51 越界
+    const empty = { sumMin: 0, sumMax: 0, rangeMin: 0, rangeMax: 0, consecutive: [], frontRepeat: [], backRepeat: [], odd: [] };
+    expect(isParamsCompliant([1, 2, 3, 20, 25, 3, 7], empty)).toBe(true);
+  });
+
+  it('buildCost:基本 2 元/追加 3 元,倍数可乘', () => {
+    expect(buildCost(2)).toEqual({ perPick: 2, additional: false, multiple: 1, total: 4 });
+    expect(buildCost(2, true)).toEqual({ perPick: 3, additional: true, multiple: 1, total: 6 });
+    expect(buildCost(2, false, 3).total).toBe(12);
+  });
+});
+
+// ============ v1.3 验证记录的数据快照 / 缺字段告警 / 分层统计 ============
+
+describe('v1.3 verifyRecord 数据完整性与金额来源', () => {
+  const normalDraw = mkDraw('2026-11-23', 758_257_386, {
+    prize1: 6_208_303, prize2: 24_835,
+    prize3: 5000, prize4: 300, prize5: 150, prize6: 15, prize7: 5,
+  });
+
+  it('七等奖走官方当期值,amountSource=official,数据完整', () => {
+    const rec = verifyRecord(mkRec('2026-11-23', [[4, 15, 40, 41, 42, 6, 3]]), normalDraw);
+    expect(rec.results![0].tier).toBe('7');
+    expect(rec.results![0].amount).toBe(5);
+    expect(rec.results![0].amountSource).toBe('official');
+    expect(rec.dataIncomplete).toBe(false);
+    expect(rec.drawSnapshot!.isUpgradeWindow).toBe(false);
+    expect(rec.drawSnapshot!.poolAfter).toBe(758_257_386);
+  });
+
+  it('固定奖字段缺失 → 标 dataIncomplete,升档期按升档默认档 7 元(不是 5 元)', () => {
+    const upgradedNoPrize = mkDraw('2026-09-16', 827_000_000, { prize1: 9_000_000, prize2: 180_000 });
+    const rec = verifyRecord(mkRec('2026-09-16', [[4, 15, 40, 41, 42, 6, 3]]), upgradedNoPrize);
+    expect(rec.results![0].amount).toBe(7);                  // 升档默认档
+    expect(rec.results![0].amountSource).toBe('upgraded-default');
+    expect(rec.dataIncomplete).toBe(true);
+    expect(rec.drawSnapshot!.dataIncomplete).toBe(true);
+  });
+
+  it('浮动奖缺官方值 → amountSource=missing(不编造金额),并标数据不完整', () => {
+    const noFloat = mkDraw('2026-11-23', 758_257_386, {
+      prize3: 5000, prize4: 300, prize5: 150, prize6: 15, prize7: 5,
+    });
+    const rec = verifyRecord(mkRec('2026-11-23', [[4, 15, 17, 24, 31, 6, 9]]), noFloat); // 5+2 一等奖
+    expect(rec.results![0].tier).toBe('1');
+    expect(rec.results![0].amount).toBe(0);
+    expect(rec.results![0].amountSource).toBe('missing');
+    expect(rec.dataIncomplete).toBe(true);
+  });
+});
+
+describe('v1.3 computeGuessStats 分层口径', () => {
+  const drawA = mkDraw('2026-11-23', 758_257_386, {
+    prize1: 6_208_303, prize2: 24_835, prize3: 5000, prize4: 300, prize5: 150, prize6: 15, prize7: 5,
+  });
+
+  it('小奖(六/七等)与长尾(一~五等)分开统计,小奖返还率可对照理论 20.9%', () => {
+    const small = verifyRecord(mkRec('2026-11-23', [[4, 15, 40, 41, 42, 6, 3]]), drawA);  // 七等 5 元
+    const tail = verifyRecord(mkRec('2026-11-23', [[4, 15, 17, 24, 31, 1, 2]]), drawA);   // 5+0 三等 5000
+    const miss = verifyRecord(mkRec('2026-11-23', [[1, 2, 3, 4, 5, 1, 2]]), drawA);        // 未中
+    const stats = computeGuessStats([small, tail, miss]);
+    expect(stats.totalPicks).toBe(3);
+    expect(stats.smallTierPrize).toBe(5);
+    expect(stats.longTailPrize).toBe(5000);
+    expect(stats.totalPrize).toBe(5005);
+    expect(stats.totalCost).toBe(6);              // 3 注 × 2 元
+    expect(stats.smallTierReturnRate).toBeCloseTo(5 / 6, 5);
+    expect(stats.longTailReturnRate).toBeCloseTo(5000 / 6, 5);
+    expect(stats.netWinPeriods).toBe(2);          // 2 期回收 > 投入
+  });
+
+  it('cost 字段优先于 注数×2(追加/倍数口径),periodCost 同步', () => {
+    const rec: GuessRecord = {
+      ...verifyRecord(mkRec('2026-11-23', [[4, 15, 40, 41, 42, 6, 3]]), drawA),
+      cost: buildCost(1, true, 2),  // 追加 + 2 倍 = 6 元
+    };
+    expect(periodCost(rec)).toBe(6);
+    expect(computeGuessStats([rec]).totalCost).toBe(6);
+  });
+
+  it('升档窗口内外分别统计净盈亏(gate.upgradeWindow 优先,其次 drawSnapshot)', () => {
+    const inWin = { ...verifyRecord(mkRec('2026-11-23', [[1, 2, 3, 4, 5, 1, 2]]), drawA),
+      gate: buildGate([mkDraw('2026-09-16', 827_000_000)]) };
+    const outWin = verifyRecord(mkRec('2026-11-23', [[4, 15, 40, 41, 42, 6, 3]]), drawA);
+    const stats = computeGuessStats([inWin, outWin]);
+    expect(stats.upgradePeriods).toBe(1);
+    expect(stats.nonUpgradePeriods).toBe(1);
+    expect(stats.upgradeNet).toBe(-2);      // 未中:0 - 2
+    expect(stats.nonUpgradeNet).toBe(3);    // 中 5 元:5 - 2
+  });
+});
+
+// ============ v1.3 期望值模型(理论口径,用于前端对照实测) ============
+
+describe('v1.3 期望值模型', () => {
+  // 参数取新规 121 期的分档官方均值(非升档 81 期 / 升档 40 期),用于复现实测返还率
+  const normalDraw = mkDraw('2026-11-23', 758_257_386, {
+    prize1: 7_715_712, prize2: 135_134, prize3: 5000, prize4: 300, prize5: 150, prize6: 15, prize7: 5,
+  });
+  const upgradeDraw = mkDraw('2026-09-16', 827_000_000, {
+    prize1: 8_152_414, prize2: 162_955, prize3: 6666, prize4: 380, prize5: 200, prize6: 18, prize7: 7,
+  });
+
+  it('每元期望返还率:非升档约 52%、升档约 65%(与实测口径一致)', () => {
+    // 实测(新规 121 期官方奖金):非升档 52.1%、升档 63.9%
+    expect(expectedReturnRate(normalDraw)).toBeCloseTo(0.521, 2);
+    expect(expectedReturnRate(upgradeDraw)).toBeCloseTo(0.639, 2);
+    expect(expectedReturnRate(upgradeDraw)).toBeGreaterThan(expectedReturnRate(normalDraw));
+  });
+
+  it('追加投注(仅浮动奖加 80%)的每元返还率低于基本投注', () => {
+    const additional = expectedReturnRate(normalDraw, { additional: true });
+    expect(additional).toBeLessThan(expectedReturnRate(normalDraw));
+    // 基本 2 元 vs 追加 3 元:期望奖金只多 80% 的浮动奖部分
+    expect(expectedPrizePerPick(normalDraw, { additional: true }))
+      .toBeGreaterThan(expectedPrizePerPick(normalDraw));
+  });
+
+  it('无开奖数据时用保守默认档仍给出合理量级(0.4~0.7)', () => {
+    const rate = expectedReturnRate(null);
+    expect(rate).toBeGreaterThan(0.4);
+    expect(rate).toBeLessThan(0.7);
   });
 });

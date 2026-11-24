@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { GuessRecord, GuessParams, LottoDraw } from './types';
-import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate, isDrawDay, resolveDailyTarget, isMarketClosed } from './services/guessCore';
+import { nextOpenDate, nextPeriodId, verifyRecord, computeBestParams, addPick, removePick, currentOpenDate, isDrawDay, resolveDailyTarget, isMarketClosed, buildGate, buildCost, computePickFeatures, isParamsCompliant } from './services/guessCore';
 import { parseCSV } from './services/lottoService';
 
 // node 运行时 process.env.API_KEY 需手动从 .env.local 加载(与 vite define 行为一致: ← GEMINI_API_KEY)
@@ -70,10 +70,18 @@ async function dailyPick(now: Date): Promise<void> {
   const history = loadHistory();
   if (history.length === 0) throw new Error('history 为空');
   const params = computeBestParams(history);
+  // v1.4 奖池闸门(软建议):升档窗口 2 组,非窗口降为 1 组
+  const gate = buildGate(history, { windowPicks: 2, offWindowPicks: 1 });
+  const pickCount = gate.suggestedPicks;
+  const poolText = gate.poolAfter ? `${(gate.poolAfter / 1e8).toFixed(3)}亿` : '未知';
+  console.log(`[guess] ${today} 奖池闸门: ${gate.upgradeWindow
+    ? `升档窗口(上期奖池 ${poolText} ≥8亿,本期三至七等奖升档)→ 建议 ${pickCount} 组`
+    : `非升档窗口(上期奖池 ${poolText},距 8 亿差 ${gate.gapToUpgrade ? (gate.gapToUpgrade / 1e4).toFixed(0) + '万' : '未知'})→ 建议 ${pickCount} 组(降注控制绝对亏损)`}`);
+
   const res = await getSmartAnalysis(
     history, params.sumMin, params.sumMax, params.rangeMin, params.rangeMax,
     params.consecutive, params.frontRepeat, params.backRepeat, params.odd,
-    2, // 默认 2 组
+    pickCount, // v1.4: 由奖池闸门决定的注数
   );
   const picks = (res.recommendations ?? []).filter(r => Array.isArray(r) && r.length === 7);
   if (picks.length === 0) { lastDailyRunDate = ''; throw new Error('AI 返回空选号'); }
@@ -85,9 +93,16 @@ async function dailyPick(now: Date): Promise<void> {
     params,
     createdAt: now.toISOString(),
     status: 'pending',
+    // ===== v1.3 数据项:成本口径 / 号码特征 / 建议参数合规 / 闸门决策 / 策略标签 =====
+    cost: buildCost(picks.length),
+    pickFeatures: picks.map(p => computePickFeatures(p, history[0])),
+    paramsCompliance: picks.map(p => isParamsCompliant(p, params)),
+    gate,
+    strategy: 'ai',
   };
   saveRecords([...loadRecords(), rec]);
   console.log(`[guess] ${today} 10:00 竞猜已生成:${targetDate}(${rec.periodId}) ${picks.length}组: ${JSON.stringify(picks)}`);
+  console.log(`[guess] 特征: ${rec.pickFeatures!.map(f => `和值${f.sum}/极差${f.range}/奇${f.oddCount}/拥挤度${f.crowdingScore}`).join(' | ')};建议参数合规: ${JSON.stringify(rec.paramsCompliance)}`);
 }
 
 /** 每 5 分钟:新开奖验证(history.csv 中 targetDate 已开奖的 pending → verified);休市目标期 → failed */
@@ -115,6 +130,16 @@ function verifyPending(history: LottoDraw[]): void {
     changed = true;
     const v = verifyRecord(r, draw);
     console.log(`[guess] 验证 ${r.targetDate}: 开奖${draw.id}, 中奖${v.results?.filter(x => x.tier).length ?? 0}/${v.picks.length}组, 奖金¥${v.totalPrize ?? 0}`);
+    if (v.dataIncomplete) {
+      // v1.3: 缺字段不再静默按默认档结算,显式告警(固定奖缺失=数据问题,浮动奖缺失=可能无人中奖)
+      const missingFixed = ['prize3', 'prize4', 'prize5', 'prize6', 'prize7']
+        .filter(k => !((draw as unknown as Record<string, number>)[k] ?? 0));
+      const missingFloat = ['prize1', 'prize2']
+        .filter(k => !((draw as unknown as Record<string, number>)[k] ?? 0));
+      console.warn(`[guess] ⚠ ${r.targetDate}(第${draw.id}期)开奖奖金字段缺失: `
+        + `固定奖[${missingFixed.join(',') || '无'}] 浮动奖[${missingFloat.join(',') || '无'}] `
+        + `→ 记录已标 dataIncomplete,金额可能不完整(检查 history.csv / lotto-update 抓取)`);
+    }
     return v;
   });
   if (changed) saveRecords(updated);
@@ -182,8 +207,17 @@ const server = createServer(async (req, res) => {
         const { records: next, pickIndex, alreadyExists } =
           addPick(loadRecords(), targetDate, numbers, params);
         const filled = fillPeriodId(next);
-        saveRecords(filled);
-        const rec = filled.find(r => r.targetDate === targetDate);
+        // v1.3: 手动加入的组同样补特征/成本/闸门,保证归因口径一致
+        const hist = loadHistory();
+        const enriched = hist.length === 0 ? filled : filled.map(r => r.targetDate === targetDate ? {
+          ...r,
+          gate: r.gate ?? buildGate(hist, { windowPicks: 2, offWindowPicks: 1 }),
+          cost: buildCost(r.picks.length),
+          pickFeatures: r.picks.map(p => computePickFeatures(p, hist[0])),
+          paramsCompliance: r.picks.map(p => isParamsCompliant(p, r.params)),
+        } : r);
+        saveRecords(enriched);
+        const rec = enriched.find(r => r.targetDate === targetDate);
         return send(res, 200, {
           ok: true, targetDate, pickIndex,
           picks: rec?.picks.length ?? 0, alreadyExists,

@@ -162,5 +162,10 @@ def start_scheduler():
 
 
 if __name__ == "__main__":
+    import sys
+    # --once: 只抓一次就退出，供 crontab 调用（2026-11-26 从 pm2 常驻改为系统定时任务）
+    if "--once" in sys.argv:
+        update_csv()
+        sys.exit(0)
     update_csv()
     start_scheduler()
